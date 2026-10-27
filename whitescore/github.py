@@ -1,0 +1,131 @@
+"""Thin GitHub API client with rate-limit awareness and retries."""
+from __future__ import annotations
+
+import logging
+import os
+import random
+import threading
+import time
+from typing import Any, Dict, Optional
+
+import requests
+
+log = logging.getLogger("whitescore.github")
+
+API_ROOT = "https://api.github.com"
+GRAPHQL_URL = API_ROOT + "/graphql"
+
+
+class GitHubError(RuntimeError):
+    pass
+
+
+class RateLimited(GitHubError):
+    def __init__(self, reset_epoch: float):
+        super().__init__("rate limited until %s" % time.strftime("%H:%M:%S", time.localtime(reset_epoch)))
+        self.reset_epoch = reset_epoch
+
+
+class GitHubClient:
+    def __init__(self, token: Optional[str] = None, max_retries: int = 5, timeout: int = 60):
+        self.token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not self.token:
+            raise GitHubError(
+                "A GitHub token is required (GraphQL cannot be used anonymously). "
+                "Set GITHUB_TOKEN in the environment.")
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": "Bearer " + self.token,
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "whitescore-collector",
+        })
+        self.max_retries = max_retries
+        self.timeout = timeout
+        self._lock = threading.Lock()
+        self.requests_made = 0
+        self.graphql_points_used = 0
+
+    # ------------------------------------------------------------------ core
+    def _sleep_until(self, epoch: float, floor: float = 2.0) -> None:
+        delay = max(floor, epoch - time.time() + 1)
+        log.warning("Rate limit hit, sleeping %.0fs", delay)
+        time.sleep(delay)
+
+    def _request(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        last_exc: Optional[BaseException] = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = self.session.request(method, url, timeout=self.timeout, **kwargs)
+            except requests.RequestException as exc:  # network blip
+                last_exc = exc
+                time.sleep(2 ** attempt + random.random())
+                continue
+            with self._lock:
+                self.requests_made += 1
+
+            if resp.status_code in (403, 429):
+                remaining = resp.headers.get("X-RateLimit-Remaining")
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    time.sleep(float(retry_after) + 1)
+                    continue
+                if remaining == "0":
+                    self._sleep_until(float(resp.headers.get("X-RateLimit-Reset", time.time() + 60)))
+                    continue
+                # secondary rate limit without headers: back off
+                time.sleep(min(120, 10 * (2 ** attempt)) + random.random())
+                continue
+            if resp.status_code >= 500 or resp.status_code == 202:
+                time.sleep(2 ** attempt + random.random())
+                last_exc = GitHubError("HTTP %s for %s" % (resp.status_code, url))
+                continue
+            return resp
+        raise GitHubError("Giving up on %s %s: %s" % (method, url, last_exc))
+
+    # ------------------------------------------------------------------ REST
+    def rest(self, path: str, params: Optional[Dict[str, Any]] = None, allow_404: bool = True) -> Optional[requests.Response]:
+        url = path if path.startswith("http") else API_ROOT + path
+        resp = self._request("GET", url, params=params)
+        if resp.status_code == 404 and allow_404:
+            return None
+        if resp.status_code >= 400:
+            raise GitHubError("HTTP %s for %s: %s" % (resp.status_code, url, resp.text[:200]))
+        return resp
+
+    def rest_json(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        resp = self.rest(path, params)
+        return resp.json() if resp is not None else None
+
+    # --------------------------------------------------------------- GraphQL
+    def graphql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        for attempt in range(self.max_retries):
+            resp = self._request("POST", GRAPHQL_URL, json={"query": query, "variables": variables or {}})
+            if resp.status_code >= 400:
+                raise GitHubError("GraphQL HTTP %s: %s" % (resp.status_code, resp.text[:300]))
+            payload = resp.json()
+            errors = payload.get("errors") or []
+            rate = (payload.get("data") or {}).get("rateLimit")
+            if rate:
+                with self._lock:
+                    self.graphql_points_used += rate.get("cost", 0)
+                if rate.get("remaining", 1) < 50:
+                    log.warning("GraphQL budget nearly exhausted (%s left)", rate.get("remaining"))
+            if errors:
+                types = {e.get("type") for e in errors}
+                if "RATE_LIMITED" in types:
+                    reset = resp.headers.get("X-RateLimit-Reset")
+                    self._sleep_until(float(reset) if reset else time.time() + 60)
+                    continue
+                # NOT_FOUND on optional sub-fields (e.g. missing README) is fine:
+                # GraphQL still returns partial data. Only fail on hard errors.
+                hard = [e for e in errors if e.get("type") not in ("NOT_FOUND", "FORBIDDEN")]
+                if hard and not payload.get("data"):
+                    raise GitHubError("GraphQL error: %s" % hard[:2])
+                if hard:
+                    log.debug("GraphQL partial errors: %s", hard[:2])
+            return payload.get("data") or {}
+        raise GitHubError("GraphQL retries exhausted")
+
+    def rate_limit(self) -> Dict[str, Any]:
+        return self.rest_json("/rate_limit") or {}

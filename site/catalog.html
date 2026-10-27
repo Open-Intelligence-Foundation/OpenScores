@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Catalog · OpenScores</title>
+  <meta name="description" content="Every open source AI project found on GitHub by the OpenScores sweep, categorized.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">W</div>
+        <div><h1>OpenScores</h1><p>White Score leaderboard for open source AI projects on GitHub</p></div>
+      </div>
+      <nav class="nav">
+        <a href="./">Leaderboard</a>
+        <a href="catalog.html" class="active">Catalog</a>
+        <a href="methodology.html">Methodology</a>
+        <a href="data/catalog.json" download>Data (JSON)</a>
+        <button class="icon-btn" id="theme" type="button" aria-label="Toggle dark mode">◐</button>
+      </nav>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+    <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+    <div class="catalog-layout">
+      <aside class="cats" id="cats" aria-label="Categories"></aside>
+      <section>
+        <div class="controls" aria-label="Filters">
+          <input type="search" id="q" placeholder="Search projects, owners, topics…" aria-label="Search projects">
+          <select id="language" aria-label="Language"><option value="">All languages</option></select>
+          <select id="sort" aria-label="Sort by">
+            <option value="stars">Sort: Stars</option>
+            <option value="pushed">Sort: Recently updated</option>
+            <option value="created">Sort: Newest</option>
+            <option value="forks">Sort: Forks</option>
+            <option value="name">Sort: Name</option>
+          </select>
+          <label class="check"><input type="checkbox" id="adjacent"> AI-adjacent</label>
+          <label class="check"><input type="checkbox" id="lists"> curated lists</label>
+          <span class="count" id="count"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="board" class="catalog">
+            <thead><tr><th class="num">#</th><th>Project</th><th>Category</th><th class="num">Stars</th><th class="num">Forks</th><th>Language</th><th>License</th><th>Updated</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <div id="empty" class="empty" hidden>No projects match.</div>
+          <div class="more-wrap"><button class="icon-btn" id="more" type="button" hidden>Show more</button></div>
+        </div>
+      </section>
+    </div>
+    <p class="foot" id="foot"></p>
+  </div>
+  <script src="catalog.js"></script>
+</body>
+</html>

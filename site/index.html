@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenScores · White Score leaderboard for open source AI</title>
+  <meta name="description" content="A daily leaderboard of open source AI projects on GitHub, ranked by their White Scores: maturity, health, popularity, risk and sustainability.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232a78d6'/><text x='16' y='22' font-size='16' font-family='system-ui' font-weight='700' text-anchor='middle' fill='white'>W</text></svg>">
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">W</div>
+        <div>
+          <h1>OpenScores</h1>
+          <p>White Score leaderboard for open source AI projects on GitHub</p>
+        </div>
+      </div>
+      <nav class="nav">
+        <a href="./" class="active">Leaderboard</a>
+        <a href="catalog.html">Catalog</a>
+        <a href="methodology.html">Methodology</a>
+        <a href="data/leaderboard.json" download>Data (JSON)</a>
+        <button class="icon-btn" id="theme" type="button" aria-label="Toggle dark mode">◐</button>
+      </nav>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+    <section class="controls" aria-label="Filters">
+      <input type="search" id="q" placeholder="Search projects, owners, topics…" aria-label="Search projects">
+      <select id="category" aria-label="Category"><option value="">All categories</option></select>
+      <select id="language" aria-label="Language"><option value="">All languages</option></select>
+      <select id="sort" aria-label="Sort by">
+        <option value="overall">Sort: Overall White Score</option>
+        <option value="maturity">Sort: Maturity</option>
+        <option value="health">Sort: Health</option>
+        <option value="popularity">Sort: Popularity</option>
+        <option value="risk">Sort: Risk (lowest first)</option>
+        <option value="sustainability">Sort: Sustainability</option>
+        <option value="stars">Sort: Stars</option>
+        <option value="delta">Sort: 7-day movers</option>
+      </select>
+      <span class="count" id="count"></span>
+    </section>
+
+    <section class="table-wrap">
+      <table id="board">
+        <thead>
+          <tr>
+            <th class="num" data-sort="rank">#</th>
+            <th data-sort="name">Project</th>
+            <th data-sort="category">Category</th>
+            <th class="num" data-sort="stars">Stars</th>
+            <th data-sort="overall" title="Mean of maturity, health and popularity">Overall</th>
+            <th data-sort="maturity">Maturity</th>
+            <th data-sort="health">Health</th>
+            <th data-sort="popularity">Popularity</th>
+            <th data-sort="risk" title="Higher is worse">Risk ↓</th>
+            <th data-sort="sustainability">Sustainability</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div id="empty" class="empty" hidden>No projects match.</div>
+    </section>
+
+    <p class="foot" id="foot"></p>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-label="Project details" aria-hidden="true"></aside>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Methodology · OpenScores</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">W</div>
+        <div><h1>OpenScores</h1><p>White Score leaderboard for open source AI projects on GitHub</p></div>
+      </div>
+      <nav class="nav">
+        <a href="./">Leaderboard</a>
+        <a href="catalog.html">Catalog</a>
+        <a href="methodology.html" class="active">Methodology</a>
+        <a href="data/leaderboard.json" download>Data (JSON)</a>
+      </nav>
+    </header>
+
+    <article class="prose">
+      <h2>The White Score for Open Source Projects</h2>
+      <p>The White Score is a five-part framework for evaluating open source repositories using GitHub-derived metrics over time. Each score is on a 0–100 scale and captures an independent dimension. A project can be popular but unhealthy, mature but unknown, or healthy today but unsustainable; separating the dimensions avoids judging a project by stars alone.</p>
+      <table>
+        <tr><th>Score</th><th>Measures</th><th>Answers</th></tr>
+        <tr><td>Maturity</td><td>Structural readiness and governance</td><td>Is the project professionally maintained?</td></tr>
+        <tr><td>Health</td><td>Current activity and responsiveness</td><td>Is the project alive and functioning well?</td></tr>
+        <tr><td>Popularity</td><td>Adoption and community traction</td><td>Is it widely used or gaining attention?</td></tr>
+        <tr><td>Risk</td><td>Dependency and abandonment risk (higher is worse)</td><td>What could go wrong if we rely on it?</td></tr>
+        <tr><td>Sustainability</td><td>Long-term viability</td><td>Can the project keep going over time?</td></tr>
+      </table>
+      <p>The leaderboard's default ranking uses the <strong>Overall White Score</strong>: the mean of maturity, health and popularity. Risk and sustainability are shown alongside and can be sorted on.</p>
+
+      <h2>How projects are found</h2>
+      <p>The <a href="catalog.html">catalog</a> is built by sweeping GitHub's repository search across 170 AI-related topics (from <code>llm</code> and <code>ai-agents</code> to <code>gaussian-splatting</code> and <code>speech-synthesis</code>). Topics with more than 1,000 matches are split into star bands to get past GitHub's per-query cap. A second pass searches repository names and descriptions for AI terms, which catches well-known projects that carry no topics, and a seed list is fetched directly. Only non-fork, non-archived repositories with at least 200 stars are kept.</p>
+      <p>Each repository gets an <strong>AI signal</strong>: two points per specific AI topic it matched, one point at most for generic tags such as <code>ai</code> or <code>chat</code>, and up to two for AI terms in its description. Repositories scoring below two are shown as <em>AI-adjacent</em> and excluded from the leaderboard. Awesome-lists, courses and paper collections are detected from names, topics and descriptions and kept in their own category. Categories are assigned by scoring each repository's topics (specific topics weigh 2, generic ones 0.25) and description keywords (1, or 2 when the keyword appears in the opening words) against sixteen category rules; the highest total wins.</p>
+      <p>The leaderboard then tracks the top catalog projects by stars (300 by default) that have a recognised open source license and at least 500 stars, merged with a seed list. Metrics come from the GitHub GraphQL and REST APIs and use a rolling 90-day window (180 days for maintainer metrics, 12 months for releases).</p>
+
+      <h2>Normalisation helpers</h2>
+      <pre class="formula">N_log(x, b)      = 100 × min(1, ln(1 + x) / ln(1 + b))      log-normalised count against a benchmark b
+N_ratio(x)       = 100 × clamp(x, 0, 1)                     a ratio already in [0, 1]
+N_recency(d, τ)  = 100 × e^(−d / τ)                         days since an event, decay constant τ</pre>
+
+      <h2>White Maturity Score</h2>
+      <pre class="formula">WMS = 0.10·A + 0.15·R + 0.15·D + 0.15·G + 0.15·C + 0.10·M + 0.10·V + 0.10·B
+
+A  = N_log(age in months, 60)
+R  = 0.7 × N_log(releases in last 12 months, 12) + 0.3 × N_recency(days since last release, 90)
+D  = 20 × (README + INSTALL + EXAMPLES + API_DOCS + TROUBLESHOOTING)
+G  = 20 × (LICENSE + CONTRIBUTING + CODE_OF_CONDUCT + SECURITY + ISSUE_TEMPLATES)
+C  = 40 × CI_PRESENT + 30 × TESTS_PRESENT + 30 × CI success rate (last 90 days)
+M  = N_log(active maintainers in last 180 days, 8)
+V  = 40 × SEMVER_TAGS + 30 × CHANGELOG + 30 × release cadence consistency
+B  = 100 − N_log(breaking-change signals in last 12 months, 10)</pre>
+      <p>Documentation and governance flags are detected from the repository tree, README text and GitHub's community-profile fields. Active maintainers are commit authors with at least three commits on the default branch in the window (bots excluded). Cadence consistency is 1 minus the coefficient of variation of the intervals between the last twelve releases. Breaking-change signals combine merged PRs with "breaking" in the title and major version bumps.</p>
+
+      <h2>White Health Score</h2>
+      <pre class="formula">WHS = 0.15·CA + 0.15·IR + 0.15·PRR + 0.15·ICR + 0.10·PMR + 0.10·BP + 0.10·CD + 0.05·RF + 0.05·CI
+
+CA  = 0.7 × N_log(commits in last 90 days, 100) + 0.3 × N_recency(days since last commit, 30)
+IR  = 100 × e^(−median issue first-response hours / 72)
+PRR = 100 × e^(−median PR first-response hours / 72)
+ICR = N_ratio(issues closed / issues opened, last 90 days)
+PMR = N_ratio(PRs merged / PRs closed, last 90 days)
+BP  = 100 × e^(−open issues / (2 × max(1, issues closed in last 90 days)))
+CD  = N_log(active contributors in last 90 days, 20)
+RF  = N_recency(days since last release, 90)
+CI  = 100 × successful workflow runs / total workflow runs (last 90 days)</pre>
+      <p>First response is the first comment or review by someone other than the author (bots excluded), or the close/merge event, measured over the 40 most recent issues and PRs. Unanswered items older than seven days count as their current age so silence is penalised. Where a signal is unobservable (no issues, no workflow runs) the component is neutral at 50.</p>
+
+      <h2>White Popularity Score</h2>
+      <pre class="formula">WPS = 0.25·S + 0.20·SG + 0.15·F + 0.10·FG + 0.10·W + 0.10·CR + 0.10·EA
+
+S  = N_log(total stars, 50,000)          SG = N_log(new stars in last 90 days, 5,000)
+F  = N_log(total forks, 10,000)          FG = N_log(new forks in last 90 days, 1,000)
+W  = N_log(watchers, 1,000)              CR = N_log(total contributors, 500)
+EA = N_log(issues + PRs opened by non-maintainers in last 90 days, 1,000)</pre>
+      <p>Benchmarks are tuned for the AI ecosystem, where star counts run high. Star and fork growth are measured from the 100 most recent stargazers and forks; when all 100 fall inside the window, the 90-day figure is extrapolated from the observed rate and marked as estimated.</p>
+
+      <h2>White Risk Score</h2>
+      <pre class="formula">WRS = 0.20·BUS + 0.15·CONC + 0.15·CS + 0.10·RS + 0.10·SEC + 0.10·STALE + 0.10·OWN + 0.10·ARCH
+
+BUS   = 100 × e^(−(bus factor − 1) / 1.5)        bus factor = authors covering 50% of recent commits
+CONC  = 100 × share of commits by the top contributor (180 days)
+CS    = 100 − N_recency(days since last commit, 90)
+RS    = 100 − N_recency(days since last release, 180)
+SEC   = 100 if no security policy, else 0
+STALE = 100 × open issues untouched for 180 days / open issues
+OWN   = 100 if owned by an individual account, else 0
+ARCH  = 100 if archived, else 0  (archived projects score at least 90)</pre>
+      <p>Interpret inversely: 0–24 low risk, 25–49 moderate, 50–74 high, 75–100 critical.</p>
+
+      <h2>White Sustainability Score</h2>
+      <pre class="formula">WSS = 0.20·MAINT + 0.15·DIV + 0.15·RET + 0.10·SPON + 0.10·ORG + 0.10·GOV + 0.10·RELC + 0.10·LOAD
+
+MAINT = N_log(active maintainers in last 180 days, 8)
+DIV   = 100 × (1 − top contributor share)
+RET   = N_ratio(contributors active in the last 90 days who were also active in the prior 90 days)
+SPON  = 100 if funding links or a sponsors listing exist, else 0
+ORG   = 100 if owned by an organization, else 0
+GOV   = governance completeness (G from maturity)
+RELC  = 0.5 × N_log(releases in last 12 months, 12) + 50 × release cadence consistency
+LOAD  = 100 × e^(−(issues + PRs opened in 90 days) / (60 × active maintainers))</pre>
+
+      <h2>Interpretation bands</h2>
+      <table>
+        <tr><th>Score</th><th>0–24</th><th>25–49</th><th>50–69</th><th>70–84</th><th>85–100</th></tr>
+        <tr><td>Maturity</td><td>Experimental</td><td>Early-stage</td><td>Usable</td><td>Mature</td><td>Highly mature</td></tr>
+        <tr><td>Health</td><td>Unhealthy</td><td>Weak</td><td>Moderate</td><td>Healthy</td><td>Very healthy</td></tr>
+        <tr><td>Popularity</td><td>Low visibility</td><td>Niche</td><td>Notable</td><td>Popular</td><td>Widely recognized</td></tr>
+        <tr><td>Sustainability</td><td>Fragile</td><td>At risk</td><td>Moderate</td><td>Sustainable</td><td>Highly sustainable</td></tr>
+      </table>
+
+      <h2>Limitations</h2>
+      <ul>
+        <li>People metrics use up to 500 of the most recent default-branch commits in the 180-day window; very active repositories are sampled.</li>
+        <li>Documentation flags are heuristic (file names and README keywords), not an assessment of quality.</li>
+        <li>CI reliability only sees GitHub Actions. Projects using other CI get a neutral score for that component.</li>
+        <li>Dependency vulnerability data requires repository admin access and is not included; the risk score uses the presence of a security policy instead.</li>
+        <li>External engagement is estimated from the maintainer share among the most recent issue and PR authors.</li>
+      </ul>
+      <p class="foot">All weights, benchmarks and windows are defined in <code>whitescore/config.py</code> and exported with each data file.</p>
+    </article>
+  </div>
+</body>
+</html>
