@@ -203,4 +203,8 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
 
     log.info("done in %.0fs; %d requests, %d graphql points, %d failures",
              time.time() - started, client.requests_made, client.graphql_points_used, len(failures))
+    if failures and not projects:
+        log.error("Every repository failed to collect. The first 'not found or inaccessible' "
+                  "warnings above carry the GraphQL error returned by GitHub; check the token's "
+                  "permissions (a fine-grained token needs 'Public repositories (read-only)').")
     return leaderboard

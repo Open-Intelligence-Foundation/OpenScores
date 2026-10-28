@@ -16,8 +16,8 @@ from typing import Dict, List, Optional, Tuple
 
 from . import config
 from .discover import categorize
-from .github import GitHubClient
-from .queries import COUNTS, MORE_HISTORY, REPO_CORE
+from .github import GitHubClient, GitHubError, describe_errors
+from .queries import COUNTS, MORE_HISTORY, REPO_CORE, REPO_EXTRAS, REPO_SPONSORS
 
 log = logging.getLogger("whitescore.collect")
 
@@ -261,6 +261,25 @@ def fetch_ci_stats(client: GitHubClient, full_name: str, now: datetime) -> Optio
     return ok / float(len(runs))
 
 
+def fetch_optional(client: GitHubClient, key: str, query: str, variables: dict) -> dict:
+    """Run a query whose fields some tokens cannot read.  Returns the repository
+    dict, or {} when it is unavailable; after a FORBIDDEN answer the query is
+    skipped for the rest of the run instead of failing every repository."""
+    if client.query_disabled(key):
+        return {}
+    try:
+        data, errors = client.graphql_full(query, variables)
+    except GitHubError as exc:
+        log.debug("optional '%s' query failed for %s: %s", key, variables.get("name"), exc)
+        return {}
+    repo = data.get("repository")
+    if repo:
+        return repo
+    if {e.get("type") for e in errors} & {"FORBIDDEN", "INSUFFICIENT_SCOPES"}:
+        client.disable_query(key, describe_errors(errors, limit=1))
+    return {}
+
+
 def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] = None) -> Optional[dict]:
     """Fetch everything for one repo. Returns None if the repo is missing."""
     now = now or utcnow()
@@ -268,12 +287,20 @@ def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] =
     since180 = (now - timedelta(days=config.MAINTAINER_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     since90 = (now - timedelta(days=config.WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    data = client.graphql(REPO_CORE, {"owner": owner, "name": name, "since180": since180, "since90": since90})
+    data, errors = client.graphql_full(
+        REPO_CORE, {"owner": owner, "name": name, "since180": since180, "since90": since90})
     repo = data.get("repository")
     if not repo:
-        log.warning("Repository %s not found or inaccessible", full_name)
+        log.warning("Repository %s not found or inaccessible%s", full_name, describe_errors(errors))
         return None
     full_name = repo["nameWithOwner"]  # canonical casing / renames
+
+    # Optional fields the token may not be allowed to read live in their own queries.
+    extras = fetch_optional(client, "funding links", REPO_EXTRAS, {"owner": owner, "name": name})
+    repo["fundingLinks"] = extras.get("fundingLinks") or []
+    repo["mentionableUsers"] = extras.get("mentionableUsers")
+    sponsors = fetch_optional(client, "sponsors listing", REPO_SPONSORS, {"owner": owner, "name": name})
+    repo.setdefault("owner", {}).update(sponsors.get("owner") or {})
 
     commits = fetch_commit_sample(client, owner, name, repo, since180)
     counts = fetch_counts(client, full_name, now)

@@ -41,20 +41,13 @@ query RepoCore($owner: String!, $name: String!, $since180: GitTimestamp!, $since
     licenseInfo { spdxId name key }
     primaryLanguage { name }
     repositoryTopics(first: 30) { nodes { topic { name } } }
-    owner {
-      __typename
-      login
-      ... on Organization { hasSponsorsListing }
-      ... on User { hasSponsorsListing }
-    }
-    fundingLinks { platform url }
+    owner { __typename login }
     codeOfConduct { key name }
     contributingGuidelines { url }
     isSecurityPolicyEnabled
     issueTemplates { name }
     pullRequestTemplates { filename }
     hasIssuesEnabled
-    mentionableUsers { totalCount }
     openIssues: issues(states: OPEN) { totalCount }
     openPRs: pullRequests(states: OPEN) { totalCount }
     defaultBranchRef {
@@ -110,6 +103,33 @@ query RepoCore($owner: String!, $name: String!, $since180: GitTimestamp!, $since
     readmeRst: object(expression: "HEAD:README.rst") { ... on Blob { text } }
     readmeLower: object(expression: "HEAD:readme.md") { ... on Blob { text } }
     readmePlain: object(expression: "HEAD:README") { ... on Blob { text } }
+  }
+}
+"""
+
+# Fields that some token types are not allowed to read.  GitHub Sponsors data
+# (hasSponsorsListing) is off-limits to fine-grained personal access tokens,
+# and in GraphQL an error on a non-null field nulls out its parents all the
+# way up to `repository`.  Keeping these in their own small queries means a
+# FORBIDDEN answer costs us the optional field, not the whole repository.
+REPO_EXTRAS = """
+query RepoExtras($owner: String!, $name: String!) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    fundingLinks { platform url }
+    mentionableUsers { totalCount }
+  }
+}
+"""
+
+REPO_SPONSORS = """
+query RepoSponsors($owner: String!, $name: String!) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    owner {
+      ... on Organization { hasSponsorsListing }
+      ... on User { hasSponsorsListing }
+    }
   }
 }
 """

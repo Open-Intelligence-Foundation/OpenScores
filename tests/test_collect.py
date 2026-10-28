@@ -128,3 +128,122 @@ def test_growth_window_not_extrapolated_when_sample_spans_window():
     assert collect._growth_in_window([], NOW, 90) == (0, False)
     recent = [NOW - timedelta(days=d) for d in range(0, 10)]
     assert collect._growth_in_window(recent, NOW, 90) == (100, True)   # 10 in 9 days -> 100 per 90 days
+
+
+# ---------------------------------------------------------------- optional queries
+class FakeClient:
+    """Minimal stand-in for GitHubClient.graphql_full with a scripted answer."""
+
+    def __init__(self, data=None, errors=None):
+        self.data, self.errors = data or {}, errors or []
+        self.calls = 0
+        self.disabled = {}
+
+    def graphql_full(self, query, variables=None):
+        self.calls += 1
+        return self.data, self.errors
+
+    def query_disabled(self, key):
+        return key in self.disabled
+
+    def disable_query(self, key, reason=""):
+        self.disabled[key] = reason
+
+
+FORBIDDEN = [{"type": "FORBIDDEN", "path": ["repository", "owner", "hasSponsorsListing"],
+              "message": "Resource not accessible by personal access token"}]
+
+
+def test_fetch_optional_returns_repository_payload():
+    client = FakeClient({"repository": {"fundingLinks": [{"platform": "GITHUB"}]}})
+    assert collect.fetch_optional(client, "x", "query", {"name": "r"}) == {"fundingLinks": [{"platform": "GITHUB"}]}
+    assert not client.disabled
+
+
+def test_fetch_optional_disables_query_after_forbidden():
+    client = FakeClient({"repository": None}, FORBIDDEN)
+    assert collect.fetch_optional(client, "sponsors", "query", {"name": "r"}) == {}
+    assert "sponsors" in client.disabled
+    assert "FORBIDDEN at /repository/owner/hasSponsorsListing" in client.disabled["sponsors"]
+    # subsequent calls are skipped without touching the API
+    assert collect.fetch_optional(client, "sponsors", "query", {"name": "r"}) == {}
+    assert client.calls == 1
+
+
+def test_fetch_optional_not_found_does_not_disable():
+    client = FakeClient({"repository": None}, [{"type": "NOT_FOUND", "path": ["repository"], "message": "nope"}])
+    assert collect.fetch_optional(client, "sponsors", "query", {"name": "r"}) == {}
+    assert not client.disabled
+
+
+def test_describe_errors_format():
+    from whitescore.github import describe_errors
+    assert describe_errors([]) == ""
+    text = describe_errors(FORBIDDEN + [{"message": "untyped"}])
+    assert text.startswith(": FORBIDDEN at /repository/owner/hasSponsorsListing: Resource not accessible")
+    assert "ERROR: untyped" in text
+
+
+class ScriptedClient(FakeClient):
+    """Answers each GraphQL document differently; REST endpoints return nothing."""
+
+    def __init__(self, core_repo, forbidden_optional=True):
+        super().__init__()
+        self.core_repo = core_repo
+        self.forbidden_optional = forbidden_optional
+        self.seen = []
+
+    def graphql_full(self, query, variables=None):
+        from whitescore import queries
+        self.calls += 1
+        if query is queries.REPO_CORE:
+            self.seen.append("core")
+            return {"repository": self.core_repo}, []
+        if query in (queries.REPO_EXTRAS, queries.REPO_SPONSORS):
+            self.seen.append("optional")
+            if self.forbidden_optional:
+                return {"repository": None}, FORBIDDEN
+            return {"repository": {"fundingLinks": [{"platform": "GITHUB"}], "mentionableUsers": {"totalCount": 5},
+                                   "owner": {"hasSponsorsListing": True}}}, []
+        if query is queries.COUNTS:
+            self.seen.append("counts")
+            return {k: {"issueCount": 3} for k in variables}, []
+        raise AssertionError("unexpected query")
+
+    def graphql(self, query, variables=None):
+        return self.graphql_full(query, variables)[0]
+
+    def rest(self, path, params=None, allow_404=True):
+        return None
+
+    def rest_json(self, path, params=None):
+        return None
+
+
+def _core_only(repo):
+    repo = dict(repo)
+    for key in ("fundingLinks", "mentionableUsers"):
+        repo.pop(key, None)
+    repo["owner"] = {"__typename": "Organization", "login": "acme"}
+    return repo
+
+
+def test_collect_repo_survives_forbidden_optional_fields():
+    client = ScriptedClient(_core_only(fake_repo()))
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert metrics is not None and metrics["full_name"] == "acme/ai-tool"
+    assert metrics["stars"] == 12000
+    assert client.seen.count("core") == 1 and client.seen.count("counts") == 1
+    assert set(client.disabled) == {"funding links", "sponsors listing"}
+    # second repository: the optional queries are no longer attempted
+    client.seen.clear()
+    assert collect.collect_repo(client, "acme/ai-tool", NOW) is not None
+    assert "optional" not in client.seen
+
+
+def test_collect_repo_uses_optional_fields_when_allowed():
+    client = ScriptedClient(_core_only(fake_repo()), forbidden_optional=False)
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert metrics["has_sponsorship"] is True
+    assert metrics["contributors_total"] == 5
+    assert not client.disabled

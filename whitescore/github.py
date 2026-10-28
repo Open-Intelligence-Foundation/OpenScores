@@ -6,7 +6,7 @@ import os
 import random
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 
@@ -18,6 +18,23 @@ GRAPHQL_URL = API_ROOT + "/graphql"
 
 class GitHubError(RuntimeError):
     pass
+
+
+def _looks_rate_limited(resp: requests.Response) -> bool:
+    """403 bodies for primary/secondary rate limits mention it; permission
+    denials ("Resource not accessible by personal access token") do not."""
+    text = resp.text[:500].lower()
+    return any(marker in text for marker in ("rate limit", "abuse", "secondary", "too many requests"))
+
+
+def describe_errors(errors: List[Dict[str, Any]], limit: int = 3) -> str:
+    """Compact ': TYPE at /path: message; ...' suffix for log lines ('' if none)."""
+    parts = []
+    for err in errors[:limit]:
+        path = err.get("path") or []
+        where = (" at /" + "/".join(str(p) for p in path)) if path else ""
+        parts.append("%s%s: %s" % (err.get("type") or "ERROR", where, str(err.get("message", ""))[:200]))
+    return (": " + "; ".join(parts)) if parts else ""
 
 
 class RateLimited(GitHubError):
@@ -45,6 +62,21 @@ class GitHubClient:
         self._lock = threading.Lock()
         self.requests_made = 0
         self.graphql_points_used = 0
+        self._disabled_queries: Set[str] = set()
+
+    # ------------------------------------------------------ optional queries
+    def query_disabled(self, key: str) -> bool:
+        with self._lock:
+            return key in self._disabled_queries
+
+    def disable_query(self, key: str, reason: str = "") -> None:
+        """Stop issuing an optional query for the rest of the run (logged once)."""
+        with self._lock:
+            if key in self._disabled_queries:
+                return
+            self._disabled_queries.add(key)
+        log.warning("Skipping optional '%s' data for the rest of this run: the token is not "
+                    "allowed to read it%s", key, reason)
 
     # ------------------------------------------------------------------ core
     def _sleep_until(self, epoch: float, floor: float = 2.0) -> None:
@@ -73,6 +105,9 @@ class GitHubClient:
                 if remaining == "0":
                     self._sleep_until(float(resp.headers.get("X-RateLimit-Reset", time.time() + 60)))
                     continue
+                if resp.status_code == 403 and not _looks_rate_limited(resp):
+                    # A plain permission denial: retrying will not help.
+                    return resp
                 # secondary rate limit without headers: back off
                 time.sleep(min(120, 10 * (2 ** attempt)) + random.random())
                 continue
@@ -87,7 +122,11 @@ class GitHubClient:
     def rest(self, path: str, params: Optional[Dict[str, Any]] = None, allow_404: bool = True) -> Optional[requests.Response]:
         url = path if path.startswith("http") else API_ROOT + path
         resp = self._request("GET", url, params=params)
-        if resp.status_code == 404 and allow_404:
+        if allow_404 and resp.status_code in (403, 404, 451):
+            # missing, token not allowed to read it, or legally blocked (DMCA):
+            # all of these mean "no data here", not "the run is broken"
+            if resp.status_code != 404:
+                log.debug("HTTP %s for %s: %s", resp.status_code, url, resp.text[:200])
             return None
         if resp.status_code >= 400:
             raise GitHubError("HTTP %s for %s: %s" % (resp.status_code, url, resp.text[:200]))
@@ -99,6 +138,11 @@ class GitHubClient:
 
     # --------------------------------------------------------------- GraphQL
     def graphql(self, query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return self.graphql_full(query, variables)[0]
+
+    def graphql_full(self, query: str, variables: Optional[Dict[str, Any]] = None
+                     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Run a query; returns (data, errors) so callers can explain a null result."""
         for attempt in range(self.max_retries):
             resp = self._request("POST", GRAPHQL_URL, json={"query": query, "variables": variables or {}})
             if resp.status_code >= 400:
@@ -124,7 +168,7 @@ class GitHubClient:
                     raise GitHubError("GraphQL error: %s" % hard[:2])
                 if hard:
                     log.debug("GraphQL partial errors: %s", hard[:2])
-            return payload.get("data") or {}
+            return payload.get("data") or {}, errors
         raise GitHubError("GraphQL retries exhausted")
 
     def rate_limit(self) -> Dict[str, Any]:

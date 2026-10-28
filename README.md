@@ -60,7 +60,9 @@ hours for everything) and three times faster with one. Useful flags:
 
 Requires Python 3.8+ and a GitHub token (the GraphQL API cannot be used
 anonymously). A fine-grained personal access token with public repository
-read access is enough.
+read access is enough. Fine-grained tokens cannot read GitHub Sponsors data,
+so with one of those the sponsorship signal comes from funding links
+(`FUNDING.yml`) only; the collector detects this and logs it once.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -111,6 +113,9 @@ Tests:
    personal access token with public repo read access. Without it the workflow
    falls back to the built-in `GITHUB_TOKEN`, which is capped at 1,000 API
    requests per hour, so set `MAX_REPOS` to roughly 150 or lower.
+   If a run logs `not found or inaccessible` for every repository, the message
+   now includes GitHub's own error; it almost always means the token lacks
+   read access to public repositories.
 4. Run the **Daily White Score refresh** workflow once manually from the Actions
    tab. It then runs every day at 06:17 UTC, commits the refreshed
    `site/data/*.json` and redeploys the site.
