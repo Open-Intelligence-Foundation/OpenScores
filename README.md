@@ -60,9 +60,11 @@ hours for everything) and three times faster with one. Useful flags:
 
 Requires Python 3.8+ and a GitHub token (the GraphQL API cannot be used
 anonymously). A fine-grained personal access token with public repository
-read access is enough. Fine-grained tokens cannot read GitHub Sponsors data,
-so with one of those the sponsorship signal comes from funding links
-(`FUNDING.yml`) only; the collector detects this and logs it once.
+read access is enough, with two caveats the collector handles on its own and
+logs once per run: fine-grained tokens are refused GitHub Sponsors data (the
+sponsorship signal then comes from funding links only) and the stargazer
+timeline in GraphQL (recent stars are then read over REST instead). A classic
+personal access token with no scopes has neither restriction.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt

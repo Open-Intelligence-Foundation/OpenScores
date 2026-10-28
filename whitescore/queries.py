@@ -21,11 +21,14 @@ query Discover($q: String!, $after: String) {
 }
 """
 
-REPO_CORE = """
-query RepoCore($owner: String!, $name: String!, $since180: GitTimestamp!, $since90: GitTimestamp!) {
-  rateLimit { cost remaining resetAt }
-  repository(owner: $owner, name: $name) {
-    nameWithOwner
+# The repository query is assembled from top-level selections keyed by their
+# response name (the alias when there is one).  Any of them except "meta" can be
+# dropped at run time: GraphQL nulls the *whole* repository when a non-null field
+# errors, and fine-grained personal access tokens are refused some fields
+# (stargazers with starredAt, for one), so a single forbidden field would
+# otherwise cost us every repository.  See collect.fetch_core.
+REPO_CORE_FIELDS = [
+    ("meta", """nameWithOwner
     name
     description
     url
@@ -37,20 +40,20 @@ query RepoCore($owner: String!, $name: String!, $since180: GitTimestamp!, $since
     isDisabled
     stargazerCount
     forkCount
-    watchers { totalCount }
+    hasIssuesEnabled
     licenseInfo { spdxId name key }
     primaryLanguage { name }
     repositoryTopics(first: 30) { nodes { topic { name } } }
-    owner { __typename login }
-    codeOfConduct { key name }
-    contributingGuidelines { url }
-    isSecurityPolicyEnabled
-    issueTemplates { name }
-    pullRequestTemplates { filename }
-    hasIssuesEnabled
-    openIssues: issues(states: OPEN) { totalCount }
-    openPRs: pullRequests(states: OPEN) { totalCount }
-    defaultBranchRef {
+    owner { __typename login }"""),
+    ("watchers", "watchers { totalCount }"),
+    ("codeOfConduct", "codeOfConduct { key name }"),
+    ("contributingGuidelines", "contributingGuidelines { url }"),
+    ("isSecurityPolicyEnabled", "isSecurityPolicyEnabled"),
+    ("issueTemplates", "issueTemplates { name }"),
+    ("pullRequestTemplates", "pullRequestTemplates { filename }"),
+    ("openIssues", "openIssues: issues(states: OPEN) { totalCount }"),
+    ("openPRs", "openPRs: pullRequests(states: OPEN) { totalCount }"),
+    ("defaultBranchRef", """defaultBranchRef {
       name
       target {
         ... on Commit {
@@ -63,12 +66,12 @@ query RepoCore($owner: String!, $name: String!, $since180: GitTimestamp!, $since
           }
         }
       }
-    }
-    releases(first: 30, orderBy: {field: CREATED_AT, direction: DESC}) {
+    }"""),
+    ("releases", """releases(first: 30, orderBy: {field: CREATED_AT, direction: DESC}) {
       totalCount
       nodes { tagName name createdAt publishedAt isPrerelease isDraft }
-    }
-    tags: refs(refPrefix: "refs/tags/", first: 30, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
+    }"""),
+    ("tags", """tags: refs(refPrefix: "refs/tags/", first: 30, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
       totalCount
       nodes {
         name
@@ -77,35 +80,52 @@ query RepoCore($owner: String!, $name: String!, $since180: GitTimestamp!, $since
           ... on Commit { committedDate }
         }
       }
-    }
-    recentIssues: issues(first: 40, orderBy: {field: CREATED_AT, direction: DESC}) {
+    }"""),
+    ("recentIssues", """recentIssues: issues(first: 40, orderBy: {field: CREATED_AT, direction: DESC}) {
       nodes {
         createdAt closedAt
         author { login }
         comments(first: 3) { nodes { createdAt author { login } } }
       }
-    }
-    recentPRs: pullRequests(first: 40, orderBy: {field: CREATED_AT, direction: DESC}) {
+    }"""),
+    ("recentPRs", """recentPRs: pullRequests(first: 40, orderBy: {field: CREATED_AT, direction: DESC}) {
       nodes {
         createdAt mergedAt closedAt
         author { login }
         reviews(first: 1) { nodes { createdAt author { login } } }
         comments(first: 2) { nodes { createdAt author { login } } }
       }
-    }
-    stargazers(first: 100, orderBy: {field: STARRED_AT, direction: DESC}) { edges { starredAt } }
-    forks(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { createdAt } }
-    root: object(expression: "HEAD:") { ... on Tree { entries { name type } } }
-    dotgithub: object(expression: "HEAD:.github") { ... on Tree { entries { name type } } }
-    workflows: object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name type } } }
-    docsDir: object(expression: "HEAD:docs") { ... on Tree { entries { name type } } }
-    readmeMd: object(expression: "HEAD:README.md") { ... on Blob { text byteSize } }
-    readmeRst: object(expression: "HEAD:README.rst") { ... on Blob { text } }
-    readmeLower: object(expression: "HEAD:readme.md") { ... on Blob { text } }
-    readmePlain: object(expression: "HEAD:README") { ... on Blob { text } }
-  }
-}
-"""
+    }"""),
+    ("stargazers", "stargazers(first: 100, orderBy: {field: STARRED_AT, direction: DESC}) { edges { starredAt } }"),
+    ("forks", "forks(first: 100, orderBy: {field: CREATED_AT, direction: DESC}) { nodes { createdAt } }"),
+    ("root", 'root: object(expression: "HEAD:") { ... on Tree { entries { name type } } }'),
+    ("dotgithub", 'dotgithub: object(expression: "HEAD:.github") { ... on Tree { entries { name type } } }'),
+    ("workflows", 'workflows: object(expression: "HEAD:.github/workflows") { ... on Tree { entries { name type } } }'),
+    ("docsDir", 'docsDir: object(expression: "HEAD:docs") { ... on Tree { entries { name type } } }'),
+    ("readmeMd", 'readmeMd: object(expression: "HEAD:README.md") { ... on Blob { text byteSize } }'),
+    ("readmeRst", 'readmeRst: object(expression: "HEAD:README.rst") { ... on Blob { text } }'),
+    ("readmeLower", 'readmeLower: object(expression: "HEAD:readme.md") { ... on Blob { text } }'),
+    ("readmePlain", 'readmePlain: object(expression: "HEAD:README") { ... on Blob { text } }'),
+]
+
+REMOVABLE_CORE_FIELDS = frozenset(key for key, _ in REPO_CORE_FIELDS if key != "meta")
+
+
+def build_repo_core(exclude=()):
+    """The RepoCore document without the given top-level selections."""
+    exclude = set(exclude) - {"meta"}
+    body = "\n    ".join(text for key, text in REPO_CORE_FIELDS if key not in exclude)
+    return (
+        "query RepoCore($owner: String!, $name: String!, $since180: GitTimestamp!, $since90: GitTimestamp!) {\n"
+        "  rateLimit { cost remaining resetAt }\n"
+        "  repository(owner: $owner, name: $name) {\n"
+        "    " + body + "\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+REPO_CORE = build_repo_core()
 
 # Fields that some token types are not allowed to read.  GitHub Sponsors data
 # (hasSponsorsListing) is off-limits to fine-grained personal access tokens,

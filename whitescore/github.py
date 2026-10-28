@@ -63,6 +63,7 @@ class GitHubClient:
         self.requests_made = 0
         self.graphql_points_used = 0
         self._disabled_queries: Set[str] = set()
+        self._disabled_fields: Dict[str, Set[str]] = {}
 
     # ------------------------------------------------------ optional queries
     def query_disabled(self, key: str) -> bool:
@@ -77,6 +78,21 @@ class GitHubClient:
             self._disabled_queries.add(key)
         log.warning("Skipping optional '%s' data for the rest of this run: the token is not "
                     "allowed to read it%s", key, reason)
+
+    def disabled_fields(self, query_name: str) -> frozenset:
+        with self._lock:
+            return frozenset(self._disabled_fields.get(query_name, ()))
+
+    def disable_field(self, query_name: str, field: str, reason: str = "") -> None:
+        """Drop one selection from a query for the rest of the run (logged once)."""
+        with self._lock:
+            fields = self._disabled_fields.setdefault(query_name, set())
+            if field in fields:
+                return
+            fields.add(field)
+        log.warning("Dropping '%s' from the %s query for the rest of this run: the token is not "
+                    "allowed to read it%s. A classic personal access token has no such restriction.",
+                    field, query_name, reason)
 
     # ------------------------------------------------------------------ core
     def _sleep_until(self, epoch: float, floor: float = 2.0) -> None:
@@ -119,9 +135,10 @@ class GitHubClient:
         raise GitHubError("Giving up on %s %s: %s" % (method, url, last_exc))
 
     # ------------------------------------------------------------------ REST
-    def rest(self, path: str, params: Optional[Dict[str, Any]] = None, allow_404: bool = True) -> Optional[requests.Response]:
+    def rest(self, path: str, params: Optional[Dict[str, Any]] = None, allow_404: bool = True,
+             headers: Optional[Dict[str, str]] = None) -> Optional[requests.Response]:
         url = path if path.startswith("http") else API_ROOT + path
-        resp = self._request("GET", url, params=params)
+        resp = self._request("GET", url, params=params, headers=headers)
         if allow_404 and resp.status_code in (403, 404, 451):
             # missing, token not allowed to read it, or legally blocked (DMCA):
             # all of these mean "no data here", not "the run is broken"

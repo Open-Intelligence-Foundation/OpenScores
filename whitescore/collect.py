@@ -17,7 +17,8 @@ from typing import Dict, List, Optional, Tuple
 from . import config
 from .discover import categorize
 from .github import GitHubClient, GitHubError, describe_errors
-from .queries import COUNTS, MORE_HISTORY, REPO_CORE, REPO_EXTRAS, REPO_SPONSORS
+from .queries import (COUNTS, MORE_HISTORY, REMOVABLE_CORE_FIELDS, REPO_EXTRAS, REPO_SPONSORS,
+                      build_repo_core)
 
 log = logging.getLogger("whitescore.collect")
 
@@ -261,6 +262,71 @@ def fetch_ci_stats(client: GitHubClient, full_name: str, now: datetime) -> Optio
     return ok / float(len(runs))
 
 
+FORBIDDEN_TYPES = ("FORBIDDEN", "INSUFFICIENT_SCOPES")
+STAR_JSON = {"Accept": "application/vnd.github.star+json"}
+
+
+def fetch_core(client: GitHubClient, variables: dict) -> Tuple[Optional[dict], List[dict]]:
+    """Run the repository query, dropping any top-level field the token is not
+    allowed to read and retrying.  Dropped fields stay dropped for the whole run
+    (fine-grained personal access tokens are refused e.g. the stargazer timeline)."""
+    errors: List[dict] = []
+    for _ in range(len(REMOVABLE_CORE_FIELDS) + 1):
+        excluded = client.disabled_fields("repository")
+        data, errors = client.graphql_full(build_repo_core(excluded), variables)
+        repo = data.get("repository")
+        if repo:
+            return repo, errors
+        dropped = False
+        for err in errors:
+            path = err.get("path") or []
+            if (err.get("type") in FORBIDDEN_TYPES and len(path) > 1 and path[0] == "repository"
+                    and path[1] in REMOVABLE_CORE_FIELDS and path[1] not in excluded):
+                client.disable_field("repository", path[1], describe_errors([err], limit=1))
+                dropped = True
+        if not dropped:
+            break
+    return None, errors
+
+
+def _last_page(link_header: str) -> int:
+    m = re.search(r'[?&]page=(\d+)>; rel="last"', link_header or "")
+    return int(m.group(1)) if m else 1
+
+
+def fetch_recent_stars_rest(client: GitHubClient, full_name: str) -> Optional[List[str]]:
+    """starred_at of the most recent ~100-200 stargazers.  The REST list is
+    oldest-first, so read the last page (and the one before it when short)."""
+    path = "/repos/%s/stargazers" % full_name
+    first = client.rest(path, {"per_page": 100}, headers=STAR_JSON)
+    if first is None:
+        return None
+    last = _last_page(first.headers.get("Link", ""))
+    if last <= 1:
+        entries = first.json()
+    else:
+        tail = client.rest(path, {"per_page": 100, "page": last}, headers=STAR_JSON)
+        entries = list(tail.json()) if tail is not None else []
+        if len(entries) < 100:
+            if last == 2:
+                prev = first.json()
+            else:
+                resp = client.rest(path, {"per_page": 100, "page": last - 1}, headers=STAR_JSON)
+                prev = resp.json() if resp is not None else []
+            entries = list(prev) + entries
+    dates = [e.get("starred_at") for e in entries if isinstance(e, dict) and e.get("starred_at")]
+    if entries and not dates:
+        return None  # the star+json media type was not honoured
+    return dates
+
+
+def fetch_recent_forks_rest(client: GitHubClient, full_name: str) -> Optional[List[str]]:
+    data = client.rest_json("/repos/%s/forks" % full_name, {"sort": "newest", "per_page": 100})
+    if data is None:
+        return None
+    return [f.get("created_at") for f in data if isinstance(f, dict) and f.get("created_at")]
+
+
 def fetch_optional(client: GitHubClient, key: str, query: str, variables: dict) -> dict:
     """Run a query whose fields some tokens cannot read.  Returns the repository
     dict, or {} when it is unavailable; after a FORBIDDEN answer the query is
@@ -287,13 +353,22 @@ def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] =
     since180 = (now - timedelta(days=config.MAINTAINER_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     since90 = (now - timedelta(days=config.WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    data, errors = client.graphql_full(
-        REPO_CORE, {"owner": owner, "name": name, "since180": since180, "since90": since90})
-    repo = data.get("repository")
+    repo, errors = fetch_core(client, {"owner": owner, "name": name, "since180": since180, "since90": since90})
     if not repo:
         log.warning("Repository %s not found or inaccessible%s", full_name, describe_errors(errors))
         return None
     full_name = repo["nameWithOwner"]  # canonical casing / renames
+
+    # Fields dropped from the GraphQL query because the token may not read them
+    # are backfilled over REST where an equivalent exists.
+    if "stargazers" not in repo:
+        dates = fetch_recent_stars_rest(client, full_name)
+        if dates is not None:
+            repo["stargazers"] = {"edges": [{"starredAt": d} for d in dates]}
+    if "forks" not in repo:
+        dates = fetch_recent_forks_rest(client, full_name)
+        if dates is not None:
+            repo["forks"] = {"nodes": [{"createdAt": d} for d in dates]}
 
     # Optional fields the token may not be allowed to read live in their own queries.
     extras = fetch_optional(client, "funding links", REPO_EXTRAS, {"owner": owner, "name": name})
@@ -390,12 +465,18 @@ def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],
     license_info = repo.get("licenseInfo") or {}
 
     # ---- popularity -------------------------------------------------------
-    star_dates = [parse_dt(e.get("starredAt")) for e in (repo.get("stargazers") or {}).get("edges") or []]
-    star_dates = [d for d in star_dates if d]
-    stars_90d, stars_est = _growth_in_window(star_dates, now, config.WINDOW_DAYS)
-    fork_dates = [parse_dt(n.get("createdAt")) for n in (repo.get("forks") or {}).get("nodes") or []]
-    fork_dates = [d for d in fork_dates if d]
-    forks_90d, forks_est = _growth_in_window(fork_dates, now, config.WINDOW_DAYS)
+    if repo.get("stargazers") is None:
+        stars_90d, stars_est = None, None  # timeline unavailable to this token
+    else:
+        star_dates = [parse_dt(e.get("starredAt")) for e in (repo.get("stargazers") or {}).get("edges") or []]
+        star_dates = [d for d in star_dates if d]
+        stars_90d, stars_est = _growth_in_window(star_dates, now, config.WINDOW_DAYS)
+    if repo.get("forks") is None:
+        forks_90d, forks_est = None, None
+    else:
+        fork_dates = [parse_dt(n.get("createdAt")) for n in (repo.get("forks") or {}).get("nodes") or []]
+        fork_dates = [d for d in fork_dates if d]
+        forks_90d, forks_est = _growth_in_window(fork_dates, now, config.WINDOW_DAYS)
 
     recent_issues = (repo.get("recentIssues") or {}).get("nodes") or []
     recent_prs = (repo.get("recentPRs") or {}).get("nodes") or []

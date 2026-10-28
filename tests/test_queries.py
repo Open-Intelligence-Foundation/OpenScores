@@ -32,6 +32,12 @@ def test_document_is_valid(schema, name):
     assert not errors, "%s: %s" % (name, [e.message for e in errors])
 
 
+def test_reduced_core_query_is_valid(schema):
+    reduced = queries.build_repo_core({"stargazers", "forks", "recentIssues", "watchers"})
+    errors = graphql.validate(schema, graphql.parse(reduced))
+    assert not errors, [e.message for e in errors]
+
+
 def test_core_query_has_no_sponsors_fields():
     # Sponsors fields are FORBIDDEN for fine-grained tokens and, being non-null,
     # would null out the whole repository. They must stay in their own query.

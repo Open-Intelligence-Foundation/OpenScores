@@ -149,6 +149,12 @@ class FakeClient:
     def disable_query(self, key, reason=""):
         self.disabled[key] = reason
 
+    def disabled_fields(self, query_name):
+        return frozenset(getattr(self, "fields", set()))
+
+    def disable_field(self, query_name, field, reason=""):
+        self.fields = getattr(self, "fields", set()) | {field}
+
 
 FORBIDDEN = [{"type": "FORBIDDEN", "path": ["repository", "owner", "hasSponsorsListing"],
               "message": "Resource not accessible by personal access token"}]
@@ -187,18 +193,26 @@ def test_describe_errors_format():
 class ScriptedClient(FakeClient):
     """Answers each GraphQL document differently; REST endpoints return nothing."""
 
-    def __init__(self, core_repo, forbidden_optional=True):
+    def __init__(self, core_repo, forbidden_optional=True, forbid_stargazers=False, rest_pages=None):
         super().__init__()
         self.core_repo = core_repo
         self.forbidden_optional = forbidden_optional
+        self.forbid_stargazers = forbid_stargazers
+        self.rest_pages = rest_pages or {}
         self.seen = []
 
     def graphql_full(self, query, variables=None):
         from whitescore import queries
         self.calls += 1
-        if query is queries.REPO_CORE:
+        if "query RepoCore" in query:
             self.seen.append("core")
-            return {"repository": self.core_repo}, []
+            if self.forbid_stargazers and "stargazers(" in query:
+                return {"repository": None}, [{"type": "FORBIDDEN", "path": ["repository", "stargazers"],
+                                               "message": "Resource not accessible by personal access token"}]
+            repo = dict(self.core_repo)
+            for field in self.disabled_fields("repository"):
+                repo.pop(field, None)
+            return {"repository": repo}, []
         if query in (queries.REPO_EXTRAS, queries.REPO_SPONSORS):
             self.seen.append("optional")
             if self.forbidden_optional:
@@ -213,8 +227,9 @@ class ScriptedClient(FakeClient):
     def graphql(self, query, variables=None):
         return self.graphql_full(query, variables)[0]
 
-    def rest(self, path, params=None, allow_404=True):
-        return None
+    def rest(self, path, params=None, allow_404=True, headers=None):
+        self.seen.append("rest:" + path)
+        return self.rest_pages.get(path)
 
     def rest_json(self, path, params=None):
         return None
@@ -247,3 +262,50 @@ def test_collect_repo_uses_optional_fields_when_allowed():
     assert metrics["has_sponsorship"] is True
     assert metrics["contributors_total"] == 5
     assert not client.disabled
+
+
+class FakeResponse:
+    def __init__(self, body, link=""):
+        self.body, self.headers = body, {"Link": link}
+
+    def json(self):
+        return self.body
+
+
+def test_fetch_core_drops_forbidden_field_and_backfills_stars_over_rest():
+    stars = [{"starred_at": iso(NOW - timedelta(days=d)), "user": {}} for d in range(0, 30)]
+    client = ScriptedClient(_core_only(fake_repo()), forbid_stargazers=True,
+                            rest_pages={"/repos/acme/ai-tool/stargazers": FakeResponse(stars)})
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert metrics is not None
+    assert client.fields == {"stargazers"}
+    assert client.seen.count("core") == 2                      # refused once, retried without the field
+    assert "rest:/repos/acme/ai-tool/stargazers" in client.seen
+    assert metrics["stars_90d"] == 93 and metrics["stars_90d_estimated"] is True   # 30 stars in 29 days
+    assert metrics["forks_90d"] == 46                           # forks still came from GraphQL
+    # next repository: the field is left out up front, no second round trip
+    client.seen.clear()
+    assert collect.collect_repo(client, "acme/ai-tool", NOW) is not None
+    assert client.seen.count("core") == 1
+
+
+def test_growth_is_null_when_no_source_available():
+    client = ScriptedClient(_core_only(fake_repo()), forbid_stargazers=True)   # REST returns nothing
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert metrics["stars_90d"] is None and metrics["stars_90d_estimated"] is None
+    from whitescore.scoring import score_all
+    assert 0 <= score_all(metrics)["popularity"] <= 100       # scorer tolerates the null
+
+
+def test_fetch_core_gives_up_on_non_removable_error():
+    client = FakeClient({"repository": None}, [{"type": "NOT_FOUND", "path": ["repository"], "message": "gone"}])
+    repo, errors = collect.fetch_core(client, {"owner": "a", "name": "b"})
+    assert repo is None and errors and client.calls == 1
+
+
+def test_build_repo_core_variants():
+    from whitescore.queries import REMOVABLE_CORE_FIELDS, build_repo_core
+    q = build_repo_core({"stargazers", "forks", "meta"})
+    assert "stargazers(" not in q and "forks(" not in q
+    assert "nameWithOwner" in q                                  # meta can never be dropped
+    assert "stargazers" in REMOVABLE_CORE_FIELDS and "meta" not in REMOVABLE_CORE_FIELDS
