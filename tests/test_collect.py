@@ -309,3 +309,14 @@ def test_build_repo_core_variants():
     assert "stargazers(" not in q and "forks(" not in q
     assert "nameWithOwner" in q                                  # meta can never be dropped
     assert "stargazers" in REMOVABLE_CORE_FIELDS and "meta" not in REMOVABLE_CORE_FIELDS
+
+
+def test_parse_dt_accepts_offsets_and_fractions():
+    from datetime import datetime, timezone
+    assert collect.parse_dt("2025-02-03T14:29:39Z") == datetime(2025, 2, 3, 14, 29, 39, tzinfo=timezone.utc)
+    assert collect.parse_dt("2025-02-03T14:29:39+08:00") == datetime(2025, 2, 3, 6, 29, 39, tzinfo=timezone.utc)
+    assert collect.parse_dt("2025-02-03T14:29:39-05:00") == datetime(2025, 2, 3, 19, 29, 39, tzinfo=timezone.utc)
+    assert collect.parse_dt("2025-02-03T14:29:39+0800") == datetime(2025, 2, 3, 6, 29, 39, tzinfo=timezone.utc)
+    assert collect.parse_dt("2025-02-03T14:29:39.123Z") == datetime(2025, 2, 3, 14, 29, 39, 123000, tzinfo=timezone.utc)
+    assert collect.parse_dt(None) is None and collect.parse_dt("") is None
+    assert collect.parse_dt("not a date") is None

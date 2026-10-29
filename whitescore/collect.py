@@ -39,9 +39,27 @@ def utcnow() -> datetime:
 
 
 def parse_dt(value: Optional[str]) -> Optional[datetime]:
+    """Parse GitHub timestamps to aware UTC datetimes.
+
+    Most API fields are ISO-8601 in UTC with a trailing Z, but git dates (tag
+    taggers, commit authors) keep their original offset, e.g.
+    2025-02-03T14:29:39+08:00, and some carry fractional seconds.
+    """
     if not value:
         return None
-    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    elif len(text) >= 5 and text[-5] in "+-" and text[-3] != ":":
+        text = text[:-2] + ":" + text[-2:]  # +0800 -> +08:00 (python 3.8 fromisoformat)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        log.debug("unparseable timestamp %r", value)
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def days_since(value: Optional[datetime], now: datetime) -> Optional[float]:

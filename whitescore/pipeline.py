@@ -134,6 +134,9 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         except GitHubError as exc:
             log.error("%s: %s", full_name, exc)
             return None
+        except Exception:  # one odd repository must not take the whole run down
+            log.exception("%s: unexpected error while collecting", full_name)
+            return None
         if metrics is None:
             return None
         if metrics["full_name"] in discovered:
