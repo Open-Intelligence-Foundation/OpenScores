@@ -194,6 +194,18 @@ def sustainability_components(m: Metrics) -> Dict[str, float]:
 
 
 # ---------------------------------------------------------------------------
+# Overall White Score
+# ---------------------------------------------------------------------------
+def overall_score(scores: Dict[str, float]) -> float:
+    """Weighted blend of the five dimensions; risk enters inverted (100 - risk)."""
+    total = 0.0
+    for key, weight in config.OVERALL_WEIGHTS.items():
+        value = float(scores.get(key) or 0.0)
+        total += weight * (100.0 - value if key == "risk" else value)
+    return round(max(0.0, min(100.0, total)), 1)
+
+
+# ---------------------------------------------------------------------------
 # Suite
 # ---------------------------------------------------------------------------
 def score_all(m: Metrics) -> Dict[str, object]:
@@ -210,10 +222,8 @@ def score_all(m: Metrics) -> Dict[str, object]:
     if m.get("is_archived"):
         risk = max(risk, 90.0)
     sustainability = weighted_total(sus, config.SUSTAINABILITY_WEIGHTS)
-    overall = round(
-        config.OVERALL_WEIGHTS["maturity"] * maturity
-        + config.OVERALL_WEIGHTS["health"] * health
-        + config.OVERALL_WEIGHTS["popularity"] * popularity, 1)
+    overall = overall_score({"maturity": maturity, "health": health, "popularity": popularity,
+                             "sustainability": sustainability, "risk": risk})
 
     return {
         "overall": overall,

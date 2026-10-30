@@ -2,7 +2,9 @@
 
 A daily leaderboard of **open source AI projects on GitHub**, ranked by their
 **White Scores**: five independent 0–100 measures of a project's maturity,
-health, popularity, risk and sustainability.
+health, popularity, risk and sustainability. The default ranking is the Overall
+White Score, a weighted blend of all five (maturity, health and popularity 0.25
+each, sustainability 0.15, inverted risk 0.10).
 
 Once a day a collector polls GitHub's API, discovers AI-related repositories
 (by topic), pulls ~60 metrics per project, computes the scores, and publishes a

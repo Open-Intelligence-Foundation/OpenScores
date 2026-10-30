@@ -87,3 +87,30 @@ def test_interpretation_bands():
     assert scoring.interpret("risk", 80) == "Critical risk"
     assert scoring.interpret("maturity", 90) == "Highly mature"
     assert scoring.interpret("health", 0) == "Unhealthy"
+
+
+def test_overall_blends_all_five_dimensions_with_risk_inverted():
+    s = scoring.score_all(strong_metrics())
+    expected = (0.25 * s["maturity"] + 0.25 * s["health"] + 0.25 * s["popularity"]
+                + 0.15 * s["sustainability"] + 0.10 * (100 - s["risk"]))
+    assert math.isclose(s["overall"], round(expected, 1), abs_tol=0.051)
+    assert scoring.overall_score({"maturity": 100, "health": 100, "popularity": 100,
+                                  "sustainability": 100, "risk": 0}) == 100.0
+    assert scoring.overall_score({"maturity": 100, "health": 100, "popularity": 100,
+                                  "sustainability": 0, "risk": 100}) == 75.0
+    assert scoring.overall_score({}) == 10.0          # unknown everything: only the "no risk" credit
+
+
+def test_archiving_lowers_the_overall_score_through_the_risk_floor():
+    live = scoring.score_all(strong_metrics())
+    archived = scoring.score_all(dict(strong_metrics(), is_archived=True))
+    assert live["maturity"] == archived["maturity"] and live["popularity"] == archived["popularity"]
+    expected_drop = 0.10 * (90.0 - live["risk"])            # risk pinned to 90, weighted 0.10
+    assert math.isclose(live["overall"] - archived["overall"], expected_drop, abs_tol=0.11)
+    assert live["overall"] - archived["overall"] > 7
+
+
+def test_single_maintainer_project_ranks_below_its_org_backed_twin():
+    team = strong_metrics()
+    solo = dict(team, bus_factor=1, top_contributor_share=0.95, active_maintainers_180d=1, owner_is_org=False)
+    assert scoring.score_all(solo)["overall"] < scoring.score_all(team)["overall"] - 5

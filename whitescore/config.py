@@ -320,9 +320,12 @@ SUSTAINABILITY_WEIGHTS = {
     "sponsorship": 0.10, "org_backing": 0.10, "governance": 0.10,
     "release_consistency": 0.10, "workload": 0.10,
 }
-# Overall White Score used for the default leaderboard ranking: the core suite
-# (maturity, health, popularity) equally weighted.
-OVERALL_WEIGHTS = {"maturity": 1 / 3, "health": 1 / 3, "popularity": 1 / 3}
+# Overall White Score used for the default leaderboard ranking. The core suite
+# carries most of the weight; sustainability and risk (entered as 100 - risk,
+# so that higher is better) enter at reduced weight because they reuse several
+# inputs the core dimensions already score.
+OVERALL_WEIGHTS = {"maturity": 0.25, "health": 0.25, "popularity": 0.25,
+                   "sustainability": 0.15, "risk": 0.10}
 
 # Bot accounts to ignore when counting humans.
 BOT_LOGINS = {

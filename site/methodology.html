@@ -32,7 +32,9 @@
         <tr><td>Risk</td><td>Dependency and abandonment risk (higher is worse)</td><td>What could go wrong if we rely on it?</td></tr>
         <tr><td>Sustainability</td><td>Long-term viability</td><td>Can the project keep going over time?</td></tr>
       </table>
-      <p>The leaderboard's default ranking uses the <strong>Overall White Score</strong>: the mean of maturity, health and popularity. Risk and sustainability are shown alongside and can be sorted on.</p>
+      <p>The leaderboard's default ranking uses the <strong>Overall White Score</strong>, a weighted blend of all five dimensions:</p>
+      <pre class="formula">Overall = 0.25 × Maturity + 0.25 × Health + 0.25 × Popularity + 0.15 × Sustainability + 0.10 × (100 − Risk)</pre>
+      <p>The core suite carries three quarters of the weight. Sustainability and risk enter at reduced weight because several of their inputs (maintainer count, commit and release recency, contributor concentration, governance) are already scored by maturity and health; counting them in full would double-weight activity and maintainer signals. Risk is inverted so that higher is better throughout. An archived project has its risk pinned at 90 or above, which on its own removes up to nine points from its overall score. Every dimension is also shown on its own and can be sorted on.</p>
 
       <h2>How projects are found</h2>
       <p>The <a href="catalog.html">catalog</a> is built by sweeping GitHub's repository search across 170 AI-related topics (from <code>llm</code> and <code>ai-agents</code> to <code>gaussian-splatting</code> and <code>speech-synthesis</code>). Topics with more than 1,000 matches are split into star bands to get past GitHub's per-query cap. A second pass searches repository names and descriptions for AI terms, which catches well-known projects that carry no topics, and a seed list is fetched directly. Only non-fork, non-archived repositories with at least 200 stars are kept.</p>
