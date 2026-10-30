@@ -43,7 +43,8 @@ def test_two_runs_use_cache_and_light_refresh(tmp_path, monkeypatch):
     # run 1: nothing cached, budget of two full collections -> third repo deferred
     board = pipeline.run(max_repos=3, max_full=2)
     assert collected == ["a/one", "a/two"]
-    assert board["project_count"] == 2 and board["failures"] == ["a/three"]
+    assert board["project_count"] == 2 and board["failures"] == []
+    assert board["deferred"] == ["a/three"]
     assert light_calls == [["a/three"]]           # asked, but nothing cached to apply it to
     cache = json.loads((tmp_path / "cache" / "metrics-cache.json").read_text())
     assert set(cache["entries"]) == {"a/one", "a/two"}
@@ -52,7 +53,7 @@ def test_two_runs_use_cache_and_light_refresh(tmp_path, monkeypatch):
     collected.clear(); light_calls.clear()
     board = pipeline.run(max_repos=3, max_full=2)
     assert collected == ["a/three"]
-    assert board["project_count"] == 3 and board["failures"] == []
+    assert board["project_count"] == 3 and board["failures"] == [] and board["deferred"] == []
     assert sorted(light_calls[0]) == ["a/one", "a/two"]
     by_name = {p["full_name"]: p for p in board["projects"]}
     assert by_name["a/one"]["metrics"]["from_cache"] is True

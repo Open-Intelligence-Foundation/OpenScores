@@ -141,6 +141,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
 
     projects: List[dict] = []
     failures: List[str] = []
+    deferred: List[str] = []   # due for collection but over this run's budget, with nothing cached yet
     cache_lock = threading.Lock()
 
     def merge_topics(metrics: dict) -> dict:
@@ -185,13 +186,15 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         for name in reuse:
             entry = cache.get(name.lower())
             if not entry:
-                failures.append(name)
+                deferred.append(name)
                 continue
             metrics = apply_light(entry["metrics"], light.get(name.lower()), now)
             entry["metrics"] = metrics
             projects.append(build_project(merge_topics(dict(metrics))))
         log.info("refreshed %d cached repositories with %d light payloads (requests=%d, graphql points=%d)",
-                 len(reuse), len(light), client.requests_made, client.graphql_points_used)
+                 len(reuse) - len(deferred), len(light), client.requests_made, client.graphql_points_used)
+        if deferred:
+            log.info("%d repositories have no cached metrics yet and wait for the next run", len(deferred))
 
     # de-duplicate on canonical name (renames can collapse two targets)
     seen = set()
@@ -228,6 +231,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             "risk": config.RISK_WEIGHTS, "sustainability": config.SUSTAINABILITY_WEIGHTS,
         },
         "failures": failures,
+        "deferred": deferred,
         "sample": False,
         "projects": projects,
     }
