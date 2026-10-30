@@ -7,7 +7,10 @@ on:
     inputs:
       max_repos:
         description: "Maximum repositories to track"
-        default: "300"
+        default: "1000"
+      max_full:
+        description: "Full (expensive) collections this run; the rest refresh from cache (-1 = all due)"
+        default: "500"
 
 permissions:
   contents: write
@@ -15,13 +18,13 @@ permissions:
   id-token: write
 
 concurrency:
-  group: whitescore-refresh
+  group: whitescore-data        # shared with the weekly catalog sweep
   cancel-in-progress: false
 
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
 
@@ -32,29 +35,28 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Refresh catalog (full GitHub sweep)
-        env:
-          GITHUB_TOKEN: ${{ secrets.WHITESCORE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
-        run: python -m whitescore.catalog
-
+      # The candidate pool comes from the committed site/data/catalog.json, which
+      # the "Weekly catalog sweep" workflow refreshes (catalog.yml).
       - name: Collect and score
         env:
           # A classic or fine-grained PAT (public repo read access) gets the full
           # 5,000 req/h budget. The default GITHUB_TOKEN works but is limited to
-          # 1,000 req/h, so lower MAX_REPOS if you rely on it.
+          # 1,000 req/h, so lower MAX_FULL_COLLECT if you rely on it.
           GITHUB_TOKEN: ${{ secrets.WHITESCORE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
-          MAX_REPOS: ${{ github.event.inputs.max_repos || '300' }}
+          MAX_REPOS: ${{ github.event.inputs.max_repos || '1000' }}
+          MAX_FULL_COLLECT: ${{ github.event.inputs.max_full || '500' }}
         run: python -m whitescore
 
       - name: Commit updated data
         run: |
           git config user.name "whitescore-bot"
           git config user.email "whitescore-bot@users.noreply.github.com"
-          git add site/data
+          git add site/data data
           if git diff --cached --quiet; then
             echo "No data changes"
           else
             git commit -m "data: daily White Score refresh $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
             git push
           fi
 

@@ -37,7 +37,8 @@
   ];
 
   var board = null, history = null, projects = [];
-  var state = { q: "", category: "", language: "", sort: "overall", dir: "desc", selected: null };
+  var PAGE = 200;
+  var state = { q: "", category: "", language: "", sort: "overall", dir: "desc", selected: null, shown: PAGE };
   var $ = function (id) { return document.getElementById(id); };
 
   // ---------------------------------------------------------------- utils
@@ -136,7 +137,10 @@
     var list = visibleProjects();
     $("count").textContent = list.length + " of " + projects.length + " projects";
     $("empty").hidden = list.length > 0;
-    var html = list.map(function (p) {
+    var remaining = list.length - state.shown;
+    $("more").hidden = remaining <= 0;
+    if (remaining > 0) $("more").textContent = "Show more (" + fmtInt(Math.min(PAGE, remaining)) + " of " + fmtInt(remaining) + " remaining)";
+    var html = list.slice(0, state.shown).map(function (p) {
       var chips = (p.topics || []).slice(0, 4).map(function (t) { return '<span class="chip">' + esc(t) + "</span>"; }).join("");
       return '<tr tabindex="0" data-id="' + esc(p.full_name) + '">' +
         '<td class="rank">' + p.rank + "</td>" +
@@ -247,11 +251,12 @@
 
   // ---------------------------------------------------------------- wiring
   function wire() {
-    $("q").addEventListener("input", function (e) { state.q = e.target.value; renderTable(); });
-    $("category").addEventListener("change", function (e) { state.category = e.target.value; renderTable(); });
-    $("language").addEventListener("change", function (e) { state.language = e.target.value; renderTable(); });
+    $("q").addEventListener("input", function (e) { state.q = e.target.value; state.shown = PAGE; renderTable(); });
+    $("category").addEventListener("change", function (e) { state.category = e.target.value; state.shown = PAGE; renderTable(); });
+    $("language").addEventListener("change", function (e) { state.language = e.target.value; state.shown = PAGE; renderTable(); });
+    $("more").addEventListener("click", function () { state.shown += PAGE; renderTable(); });
     $("sort").addEventListener("change", function (e) {
-      state.sort = e.target.value; state.dir = state.sort === "risk" || state.sort === "name" || state.sort === "category" ? "asc" : "desc"; renderTable();
+      state.sort = e.target.value; state.dir = state.sort === "risk" || state.sort === "name" || state.sort === "category" ? "asc" : "desc"; state.shown = PAGE; renderTable();
     });
     document.querySelector("thead").addEventListener("click", function (e) {
       var th = e.target.closest("th"); if (!th) return;
@@ -259,7 +264,7 @@
       if (state.sort === key) state.dir = state.dir === "asc" ? "desc" : "asc";
       else { state.sort = key; state.dir = (key === "rank" || key === "name" || key === "category" || key === "risk") ? "asc" : "desc"; }
       $("sort").value = SCORE_KEYS.indexOf(key) !== -1 || key === "stars" ? key : "overall";
-      renderTable();
+      state.shown = PAGE; renderTable();
     });
     $("rows").addEventListener("click", function (e) { var tr = e.target.closest("tr"); if (tr) openProject(tr.getAttribute("data-id")); });
     $("rows").addEventListener("keydown", function (e) {

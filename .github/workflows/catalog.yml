@@ -1,0 +1,53 @@
+name: Weekly catalog sweep
+
+# Rebuilds site/data/catalog.json (every AI-related repository above the star
+# threshold) and CATALOG.md. The sweep takes about an hour and the candidate
+# pool changes slowly, so it runs weekly; the daily refresh reads the committed
+# catalog and only collects and scores.
+
+on:
+  schedule:
+    - cron: "41 2 * * 0"        # Sundays, 02:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: whitescore-data        # never push data at the same time as the daily refresh
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Sweep GitHub for AI repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.WHITESCORE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+        run: python -m whitescore.catalog
+
+      - name: Export CATALOG.md
+        run: python scripts/export_catalog_md.py
+
+      - name: Commit updated catalog
+        run: |
+          git config user.name "whitescore-bot"
+          git config user.email "whitescore-bot@users.noreply.github.com"
+          git add site/data/catalog.json site/data/catalog-web.json CATALOG.md
+          if git diff --cached --quiet; then
+            echo "No catalog changes"
+          else
+            git commit -m "data: weekly catalog sweep $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
+            git push
+          fi

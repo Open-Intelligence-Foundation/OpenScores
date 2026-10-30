@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from . import __version__, config
 from .collect import collect_repo
 from .discover import discover, select_repos
 from .github import GitHubClient, GitHubError
+from .incremental import apply_light, fetch_light, load_cache, plan_collection, prune_cache, save_cache
 from .scoring import interpret, score_all
 
 log = logging.getLogger("whitescore.pipeline")
@@ -24,6 +26,7 @@ LEADERBOARD_PATH = DATA_DIR / "leaderboard.json"
 HISTORY_PATH = DATA_DIR / "history.json"
 SEED_FILE = ROOT / "seed_repos.txt"
 CATALOG_PATH = DATA_DIR / "catalog.json"
+CACHE_PATH = ROOT / "data" / "metrics-cache.json"   # committed, not served
 
 
 def load_seed_file() -> List[str]:
@@ -106,11 +109,13 @@ def build_project(metrics: dict) -> dict:
     }
 
 
-def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_run: bool = False) -> dict:
+def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_run: bool = False,
+        max_full: Optional[int] = None) -> dict:
     started = time.time()
     client = GitHubClient()
     now = datetime.now(timezone.utc)
     day = now.strftime("%Y-%m-%d")
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     max_repos = max_repos or config.MAX_REPOS
 
     if repos:
@@ -123,10 +128,27 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         else:
             discovered = discover(client)
         targets = select_repos(discovered, seeds=config.SEED_REPOS + load_seed_file(), max_repos=max_repos)
-    log.info("Collecting %d repositories (%d candidates)", len(targets), len(discovered))
+    log.info("Tracking %d repositories (%d candidates)", len(targets), len(discovered))
+
+    # Incremental plan: full collections for new/stale repos, cache + light refresh for the rest.
+    cache = load_cache(CACHE_PATH)
+    if repos:
+        full, reuse, stats = list(targets), [], {"new": 0, "stale": 0, "deferred": 0, "fresh": 0}
+    else:
+        full, reuse, stats = plan_collection(targets, cache, now, max_full=max_full)
+    log.info("Plan: %d full collections (%d new, %d stale, %d deferred to later runs), %d refreshed from cache",
+             len(full), stats["new"], stats["stale"], stats["deferred"], len(reuse))
 
     projects: List[dict] = []
     failures: List[str] = []
+    cache_lock = threading.Lock()
+
+    def merge_topics(metrics: dict) -> dict:
+        if metrics["full_name"] in discovered:
+            # merge topics seen across search results (repositoryTopics is capped)
+            extra = discovered[metrics["full_name"]].get("topics") or []
+            metrics["topics"] = sorted(set(metrics["topics"]) | set(extra))[:15]
+        return metrics
 
     def work(full_name: str) -> Optional[dict]:
         try:
@@ -139,23 +161,37 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             return None
         if metrics is None:
             return None
-        if metrics["full_name"] in discovered:
-            # merge topics seen across search results (repositoryTopics is capped)
-            extra = discovered[metrics["full_name"]].get("topics") or []
-            metrics["topics"] = sorted(set(metrics["topics"]) | set(extra))[:15]
-        return build_project(metrics)
+        with cache_lock:
+            cache[metrics["full_name"].lower()] = {"collected_at": stamp, "metrics": dict(metrics)}
+            if full_name.lower() != metrics["full_name"].lower():
+                cache.pop(full_name.lower(), None)  # renamed: drop the stale key
+        return build_project(merge_topics(metrics))
 
-    with ThreadPoolExecutor(max_workers=max(1, config.WORKERS)) as pool:
-        futures = {pool.submit(work, r): r for r in targets}
-        for i, fut in enumerate(as_completed(futures), 1):
-            result = fut.result()
-            if result:
-                projects.append(result)
-            else:
-                failures.append(futures[fut])
-            if i % 25 == 0 or i == len(futures):
-                log.info("progress %d/%d (requests=%d, graphql points=%d)", i, len(futures),
-                         client.requests_made, client.graphql_points_used)
+    if full:
+        with ThreadPoolExecutor(max_workers=max(1, config.WORKERS)) as pool:
+            futures = {pool.submit(work, r): r for r in full}
+            for i, fut in enumerate(as_completed(futures), 1):
+                result = fut.result()
+                if result:
+                    projects.append(result)
+                else:
+                    failures.append(futures[fut])
+                if i % 25 == 0 or i == len(futures):
+                    log.info("progress %d/%d (requests=%d, graphql points=%d)", i, len(futures),
+                             client.requests_made, client.graphql_points_used)
+
+    if reuse:
+        light = fetch_light(client, reuse)
+        for name in reuse:
+            entry = cache.get(name.lower())
+            if not entry:
+                failures.append(name)
+                continue
+            metrics = apply_light(entry["metrics"], light.get(name.lower()), now)
+            entry["metrics"] = metrics
+            projects.append(build_project(merge_topics(dict(metrics))))
+        log.info("refreshed %d cached repositories with %d light payloads (requests=%d, graphql points=%d)",
+                 len(reuse), len(light), client.requests_made, client.graphql_points_used)
 
     # de-duplicate on canonical name (renames can collapse two targets)
     seen = set()
@@ -202,7 +238,8 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         LEADERBOARD_PATH.write_text(json.dumps(leaderboard, separators=(",", ":")))
         HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
-        log.info("wrote %s (%d projects) and %s", LEADERBOARD_PATH, len(projects), HISTORY_PATH)
+        save_cache(CACHE_PATH, prune_cache(cache, targets, now))
+        log.info("wrote %s (%d projects), %s and %s", LEADERBOARD_PATH, len(projects), HISTORY_PATH, CACHE_PATH)
 
     log.info("done in %.0fs; %d requests, %d graphql points, %d failures",
              time.time() - started, client.requests_made, client.graphql_points_used, len(failures))

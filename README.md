@@ -12,10 +12,19 @@ static site with the leaderboard, per-project breakdowns and score history.
 
 ```
 GitHub API ──► whitescore (Python) ──► site/data/*.json ──► static site (GitHub Pages)
-   daily            discover            leaderboard.json      index.html / app.js
-   cron             collect             history.json          methodology.html
+   weekly           catalog sweep       catalog.json          catalog.html
+   daily            select from catalog leaderboard.json      index.html / app.js
+   cron             collect (incremental) history.json        methodology.html
                     score
 ```
+
+Two scheduled workflows share the work. The **weekly catalog sweep** finds
+every AI-related repository above the star threshold (about an hour of search
+requests). The **daily refresh** takes the top `MAX_REPOS` of them, fully
+collects the ones that are new or have not been fully collected for
+`FULL_REFRESH_DAYS` days (at most `MAX_FULL_COLLECT` per run), brings the rest
+up to date from a metrics cache with one light query per fifty repositories,
+rescores everything and redeploys the site.
 
 | Piece | Where |
 |---|---|
@@ -23,8 +32,10 @@ GitHub API ──► whitescore (Python) ──► site/data/*.json ──► st
 | Metric collection (GraphQL + REST) | `whitescore/collect.py`, `whitescore/queries.py` |
 | Score formulas (pure functions, unit-tested) | `whitescore/scoring.py` |
 | Orchestration, history, output files | `whitescore/pipeline.py` |
+| Incremental collection and metrics cache | `whitescore/incremental.py` |
 | Leaderboard site (no build step) | `site/` |
 | Daily cron + Pages deploy | `.github/workflows/daily.yml` |
+| Weekly catalog sweep | `.github/workflows/catalog.yml` |
 
 The scoring methodology, including every formula and benchmark, is on the
 site's Methodology page (`site/methodology.html`).
@@ -120,7 +131,13 @@ Tests:
    read access to public repositories.
 4. Run the **Daily White Score refresh** workflow once manually from the Actions
    tab. It then runs every day at 06:17 UTC, commits the refreshed
-   `site/data/*.json` and redeploys the site.
+   `site/data/*.json` plus `data/metrics-cache.json` and redeploys the site.
+   With the default cap of 500 full collections per run, the first run scores
+   500 projects and the second completes the 1,000; after that each run fully
+   recollects about a third of them and refreshes the rest from cache.
+5. The **Weekly catalog sweep** workflow runs on Sundays and can also be run
+   manually. It rebuilds `site/data/catalog.json` and `CATALOG.md`; the daily
+   refresh reads the committed catalog, so the sweep never delays scoring.
 
 ## Configuration
 
@@ -129,26 +146,37 @@ environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MAX_REPOS` | 300 | Repositories tracked per run (top by stars, after seeds) |
+| `MAX_REPOS` | 1000 | Repositories tracked per run (top by stars, after seeds) |
+| `MAX_FULL_COLLECT` | 500 | Full collections per run; the rest are refreshed from cache (-1 = unlimited) |
+| `FULL_REFRESH_DAYS` | 3 | A repository is fully recollected once it is this many days old in the cache |
+| `LIGHT_BATCH` | 50 | Repositories per light-refresh GraphQL request |
 | `MIN_STARS` | 500 | Discovery threshold |
 | `PAGES_PER_TOPIC` | 2 | Search pages (100 results each) per topic |
 | `REQUIRE_RECOGNIZED_LICENSE` | true | Drop repos whose license GitHub cannot identify |
 | `MAX_COMMIT_PAGES` | 5 | Up to 500 recent commits sampled per repo |
 | `WORKERS` | 3 | Concurrent repositories collected |
+| `HISTORY_MAX_POINTS` | 120 | Daily score points kept per project |
 | `BENCH_STARS`, `BENCH_FORKS`, … | see config | Popularity saturation benchmarks |
 
 Add repositories that topic search misses to `seed_repos.txt`.
 
 ### API budget
 
-A full run of 300 repositories uses roughly 1,000–1,500 requests and
-2,500–3,500 GraphQL points, well inside the 5,000/hour limits of a personal
-token. The client backs off automatically on rate limits.
+A full collection costs about 10 requests and 7 GraphQL points per repository
+(measured: 25 repositories took 262 requests and 185 points), so 500 full
+collections use roughly 5,000 requests and 3,700 points, and the light refresh
+of the other 500 adds 10 GraphQL requests. That fits a personal token's
+5,000/hour limits for REST and GraphQL separately; when a limit is hit the
+client sleeps until it resets, so a run may take up to about two hours. Raise
+`MAX_FULL_COLLECT` only with a bigger budget (a GitHub App token), never by
+pooling several personal tokens, which GitHub's terms forbid.
 
 ## Data files
 
 * `site/data/leaderboard.json` – the latest run: every project with its five
   scores, the weighted components behind each score, raw metrics, category,
   7-day deltas, plus the weights and benchmarks used.
-* `site/data/history.json` – per-project daily score series (up to 400 points)
+* `site/data/history.json` – per-project daily score series (up to 120 points)
   used for sparklines and deltas.
+* `data/metrics-cache.json` – the last full collection of every tracked
+  repository, used by the incremental daily refresh. Committed but not served.

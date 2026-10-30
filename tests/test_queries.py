@@ -38,6 +38,12 @@ def test_reduced_core_query_is_valid(schema):
     assert not errors, [e.message for e in errors]
 
 
+def test_light_refresh_query_is_valid(schema):
+    from whitescore.incremental import build_light_query
+    errors = graphql.validate(schema, graphql.parse(build_light_query(["acme/ai-tool", "other/repo"])))
+    assert not errors, [e.message for e in errors]
+
+
 def test_core_query_has_no_sponsors_fields():
     # Sponsors fields are FORBIDDEN for fine-grained tokens and, being non-null,
     # would null out the whole repository. They must stay in their own query.
