@@ -3,3 +3,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# Run output. The workflows carry these between runs in the Actions cache and
+# deploy them with the site; only the score history is committed (once a day).
+site/data/*.json
+!site/data/history.json
+data/*.json

@@ -58,6 +58,9 @@ a seed list fetched directly. It writes two files:
 * `site/data/catalog-web.json` – a slim copy with short keys that the site's
   **Catalog** page loads (GitHub Pages serves it gzipped).
 
+Neither file is committed (together they are about 28 MB and change weekly);
+see *Data files* below for where they live and how to fetch the latest ones.
+
 Each repository gets an **AI signal** so that projects merely tagged `ai` or
 `chat` (databases, UI kits, chat servers) are marked *AI-adjacent* and kept out
 of the leaderboard. Awesome-lists, courses and paper collections are kept in a
@@ -112,6 +115,21 @@ Full run (catalog selection + up to `MAX_REPOS` projects):
 .venv/bin/python -m whitescore
 ```
 
+A fresh clone has no data files: the leaderboard, catalog and metrics cache
+are not committed (see *Data files*). To start from the live site's latest
+data instead of collecting everything yourself, download them first (replace
+the host with your own Pages URL if you run a fork):
+
+```bash
+site=https://openscores.io
+for f in leaderboard history catalog catalog-web; do curl -fsSL "$site/data/$f.json" -o "site/data/$f.json"; done
+for f in metrics-cache token-preferences; do curl -fsSL "$site/data/$f.json" -o "data/$f.json"; done
+```
+
+With the catalog and metrics cache in place, `python -m whitescore` behaves
+exactly as a workflow run does: it skips live discovery and only fully
+recollects the repositories whose cached metrics are stale.
+
 Serve the site:
 
 ```bash
@@ -147,16 +165,32 @@ Tests:
    Optionally add `WHITESCORE_GITHUB_TOKEN_FALLBACK` with a fine-grained token
    (public repositories, read-only) for organizations that refuse classic
    tokens; see *Run it locally* above.
-4. Run the **White Score refresh** workflow once manually from the Actions
-   tab. It then runs every six hours (00:17, 06:17, 12:17 and 18:17 UTC),
-   commits the refreshed `site/data/*.json` plus `data/metrics-cache.json` and
-   `data/token-preferences.json`, and redeploys the site. With the default cap
-   of 300 full collections per run, the first four runs build up the 1,000
-   projects over a day; after that each run fully recollects the ~250 whose
-   cached metrics are a day old and refreshes the rest from cache.
-5. The **Weekly catalog sweep** workflow runs on Sundays and can also be run
-   manually. It rebuilds `site/data/catalog.json` and `CATALOG.md`; the
-   refresh reads the committed catalog, so the sweep never delays scoring.
+4. Run the **Weekly catalog sweep** workflow once manually from the Actions
+   tab, so the first refresh has a candidate pool (without one it falls back
+   to live topic discovery). It then runs on Sundays, rebuilds
+   `site/data/catalog.json` and `catalog-web.json`, hands them to the refresh
+   through the Actions cache, and commits only `CATALOG.md`. The catalog page
+   on the site picks up a new sweep at the next refresh, within six hours.
+5. Run the **White Score refresh** workflow once manually. It then runs every
+   six hours (00:17, 06:17, 12:17 and 18:17 UTC): it restores the previous
+   run's `data/metrics-cache.json`, `data/token-preferences.json` and
+   `site/data/history.json` from the Actions cache, collects and scores,
+   saves the new state to the cache, and deploys `site/` to Pages straight
+   from the run, with copies of the two state files alongside the leaderboard.
+   Nothing is committed except `site/data/history.json`, once a day. With the
+   default cap of 300 full collections per run, the first four runs build up
+   the 1,000 projects over a day; after that each run fully recollects the
+   ~250 whose cached metrics are a day old and refreshes the rest from cache.
+
+The cache is a convenience, not the source of truth. GitHub drops cache
+entries that have not been used for a week, so if the workflow is paused for
+longer (or runs for the first time in a fork) the refresh fetches the state
+files from the live site instead, which always has the last deployment. Only
+a repository that has never deployed starts from nothing: that first run
+scores as many repositories as its full-collection cap allows and the board
+fills up over the following runs. The one daily commit is a durable record
+of the score series and also counts as repository activity, so GitHub does
+not disable the schedule after 60 days without commits.
 
 ## Configuration
 
@@ -195,7 +229,7 @@ means each run fully recollects about 250 repositories (~2,600 requests and
 and light-refreshes the other 750, in 15 to 20 minutes with six workers.
 Running more often would not make the full metrics fresher, since the daily
 budget only covers each repository once; it would only shorten the six-hour
-lag on the light fields at the cost of another commit, Pages deploy and
+lag on the light fields at the cost of another Pages deploy and more
 Actions minutes per run. Four runs are about 80 Actions minutes a day
 (2,400 a month, plus about 240 for the weekly sweep). Public repositories get
 unlimited Actions minutes; a private repository on the Pro or Team plan has
@@ -208,13 +242,38 @@ token is not pooling: a repository is read with one token per run.
 
 ## Data files
 
+The collector reads and writes plain JSON files on disk, the same ones
+whether it runs locally or in Actions:
+
 * `site/data/leaderboard.json` – the latest run: every project with its five
   scores, the weighted components behind each score, raw metrics, category,
   7-day deltas, plus the weights and benchmarks used.
 * `site/data/history.json` – per-project daily score series (up to 120 points)
   used for sparklines and deltas. Several runs on one day update that day's
   point rather than adding more.
+* `site/data/catalog.json` and `catalog-web.json` – the weekly catalog sweep
+  (see *The catalog*).
 * `data/metrics-cache.json` – the last full collection of every tracked
-  repository, used by the incremental refresh. Committed but not served.
+  repository, used by the incremental refresh.
 * `data/token-preferences.json` – repositories that the primary token was
-  refused and the fallback token could read. Committed but not served.
+  refused and the fallback token could read.
+
+Where each file lives:
+
+| File | In git (`main`) | Actions cache | Live site (`/data/…`) |
+| --- | --- | --- | --- |
+| `leaderboard.json` | no | no (rebuilt every run) | yes |
+| `history.json` | yes, one commit a day | yes | yes |
+| `catalog.json`, `catalog-web.json` | no | yes, from the weekly sweep | yes |
+| `metrics-cache.json`, `token-preferences.json` | no | yes | yes, as a fallback copy |
+| `CATALOG.md` | yes, weekly | no | no |
+
+To inspect the latest data, open `https://<your-pages-host>/data/<file>`
+(for this deployment,
+https://openscores.io/data/leaderboard.json
+and so on), or download all of them with the loop in *Run it locally*. The
+leaderboard and catalog carry a `generated_at` timestamp, history points are
+dated, and each metrics-cache entry records its `collected_at`. The cached
+copies can also be downloaded from the **Caches** page of the Actions tab.
+Run output is git-ignored, so a local run never dirties the working tree
+beyond `site/data/history.json`.

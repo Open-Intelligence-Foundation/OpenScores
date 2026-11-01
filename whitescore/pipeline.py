@@ -27,7 +27,7 @@ LEADERBOARD_PATH = DATA_DIR / "leaderboard.json"
 HISTORY_PATH = DATA_DIR / "history.json"
 SEED_FILE = ROOT / "seed_repos.txt"
 CATALOG_PATH = DATA_DIR / "catalog.json"
-CACHE_PATH = ROOT / "data" / "metrics-cache.json"   # committed, not served
+CACHE_PATH = ROOT / "data" / "metrics-cache.json"   # carried between runs by the workflow, not committed
 TOKEN_PREFS_PATH = ROOT / "data" / "token-preferences.json"   # repos that need the fallback token
 
 

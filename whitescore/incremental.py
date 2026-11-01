@@ -8,7 +8,8 @@ repository is refreshed from the previous run's metrics plus one cheap "light"
 GraphQL query that reads fifty repositories at a time: stars, forks, watchers,
 open issues and PRs, archived flag and last commit date.
 
-The cache lives outside site/ so it is committed but never served.
+The cache lives outside site/; the refresh workflow carries it between runs
+in the Actions cache (and publishes a copy with the site as a fallback).
 """
 from __future__ import annotations
 

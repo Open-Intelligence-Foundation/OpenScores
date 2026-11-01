@@ -5,6 +5,13 @@ name: White Score refresh
 # token's 5,000/hour budget) and refreshes the other ~750 with 15 light GraphQL
 # requests, so every project is fully recollected daily and its stars, forks,
 # issues, pull requests and last commit are at most six hours old.
+#
+# A run commits nothing except the score history, once a day. The collector's
+# state (metrics cache, token preferences, history) travels from run to run in
+# the Actions cache; the live Pages site serves the same files and is the
+# fallback when the cache has nothing (first run, or caches evicted after a
+# week without runs). The site is deployed straight from the run's working
+# tree, so main stays code-only and the repository does not grow with the data.
 on:
   schedule:
     - cron: "17 */6 * * *"      # 00:17, 06:17, 12:17, 18:17 UTC
@@ -18,7 +25,7 @@ on:
         default: "300"
 
 permissions:
-  contents: write
+  contents: write               # the daily score-history commit
   pages: write
   id-token: write
 
@@ -40,8 +47,58 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      # The candidate pool comes from the committed site/data/catalog.json, which
-      # the "Weekly catalog sweep" workflow refreshes (catalog.yml).
+      # Each run saves its state under a new key, so the prefix restores the
+      # newest one. Entries that are never restored again expire after a week.
+      - name: Restore the collector's state from the previous run
+        id: state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/metrics-cache.json
+            data/token-preferences.json
+            site/data/history.json
+          key: whitescore-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: whitescore-state-
+
+      # The candidate pool comes from site/data/catalog.json, which the
+      # "Weekly catalog sweep" workflow (catalog.yml) rebuilds and caches.
+      - name: Restore the catalog from the last weekly sweep
+        id: catalog
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            site/data/catalog.json
+            site/data/catalog-web.json
+          key: whitescore-catalog-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: whitescore-catalog-
+
+      - uses: actions/configure-pages@v5
+        id: pages
+
+      # The deployed site carries every state file, so a cache miss costs
+      # nothing as long as the site has been deployed once. Only a fresh
+      # repository starts from scratch: live discovery instead of the catalog,
+      # and a full collection of every repository over the first few runs.
+      - name: Fall back to the live site for files the caches did not have
+        if: steps.state.outputs.cache-matched-key == '' || steps.catalog.outputs.cache-matched-key == ''
+        env:
+          SITE: ${{ steps.pages.outputs.base_url }}
+          STATE_RESTORED: ${{ steps.state.outputs.cache-matched-key }}
+        run: |
+          # The checked-out history.json is the day's commit; the site's copy is at least as new.
+          [ -n "$STATE_RESTORED" ] || rm -f site/data/history.json
+          for f in data/metrics-cache.json data/token-preferences.json \
+                   site/data/history.json site/data/catalog.json site/data/catalog-web.json; do
+            [ -s "$f" ] && continue
+            if curl -fsSL --retry 3 "$SITE/data/$(basename "$f")" -o "$f.download"; then
+              mv "$f.download" "$f" && echo "restored $f from the live site"
+            else
+              rm -f "$f.download" && echo "$f: not on the live site either, starting without it"
+            fi
+          done
+          # Back to the committed copy, if there is one (a fresh fork has none yet).
+          [ -s site/data/history.json ] || git checkout -- site/data/history.json 2>/dev/null || true
+
       - name: Collect and score
         env:
           # Primary token: a classic PAT (public_repo scope) reads everything,
@@ -57,22 +114,54 @@ jobs:
           MAX_FULL_COLLECT: ${{ github.event.inputs.max_full || '300' }}
         run: python -m whitescore
 
-      - name: Commit updated data
+      - name: Save the collector's state for the next run
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/metrics-cache.json
+            data/token-preferences.json
+            site/data/history.json
+          key: ${{ steps.state.outputs.cache-primary-key }}
+
+      - name: Publish the state files with the site (the fallback for a cache miss)
         run: |
-          git config user.name "whitescore-bot"
-          git config user.email "whitescore-bot@users.noreply.github.com"
-          git add site/data data
-          if git diff --cached --quiet; then
-            echo "No data changes"
-          else
-            git commit -m "data: White Score refresh $(date -u '+%Y-%m-%d %H:%M UTC')"
-            git pull --rebase origin main
-            git push
-          fi
+          for f in data/metrics-cache.json data/token-preferences.json; do
+            [ -f "$f" ] && cp "$f" site/data/
+          done
+          ls -la site/data
 
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+      # The one thing a run commits: the score series, on the first successful
+      # run of each UTC day (a few tens of kilobytes in git). It is a durable
+      # record of the scores and keeps the repository active, so GitHub does
+      # not disable the schedule after 60 days without commits.
+      - name: Commit the score history once a day
+        run: |
+          today=$(date -u +%F)
+          if git show HEAD:site/data/history.json 2>/dev/null | python -c '
+          import json, sys
+          try:
+              history = json.load(sys.stdin)
+          except ValueError:
+              sys.exit(1)
+          sys.exit(0 if any(s and s[-1]["d"] == sys.argv[1] for s in history.values()) else 1)
+          ' "$today"; then
+            echo "Score history for $today is already committed"
+            exit 0
+          fi
+          git add site/data/history.json
+          if git diff --cached --quiet; then
+            echo "Score history unchanged"
+            exit 0
+          fi
+          git config user.name "whitescore-bot"
+          git config user.email "whitescore-bot@users.noreply.github.com"
+          git commit -m "data: score history $today"
+          git pull --rebase origin main
+          git push
 
   deploy:
     needs: collect
