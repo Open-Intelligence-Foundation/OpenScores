@@ -39,6 +39,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # the last-resort fallback below reads committed copies from history
 
       - uses: actions/setup-python@v5
         with:
@@ -82,7 +84,9 @@ jobs:
       - name: Fall back to the live site for files the caches did not have
         if: steps.state.outputs.cache-matched-key == '' || steps.catalog.outputs.cache-matched-key == ''
         env:
-          SITE: ${{ steps.pages.outputs.base_url }}
+          # The Pages URL (a custom domain when one is configured) and the
+          # plain github.io address, in case the custom domain is not serving.
+          SITES: ${{ steps.pages.outputs.base_url }} https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
           STATE_RESTORED: ${{ steps.state.outputs.cache-matched-key }}
         run: |
           # The checked-out history.json is the day's commit; the site's copy is at least as new.
@@ -90,10 +94,25 @@ jobs:
           for f in data/metrics-cache.json data/token-preferences.json \
                    site/data/history.json site/data/catalog.json site/data/catalog-web.json; do
             [ -s "$f" ] && continue
-            if curl -fsSL --retry 3 "$SITE/data/$(basename "$f")" -o "$f.download"; then
-              mv "$f.download" "$f" && echo "restored $f from the live site"
+            for site in $SITES; do
+              if curl -fsSL --retry 3 "$site/data/$(basename "$f")" -o "$f.download"; then
+                mv "$f.download" "$f" && echo "restored $f from $site" && break
+              fi
+              rm -f "$f.download"
+            done
+            [ -s "$f" ] || echo "$f: not on the live site either"
+          done
+          # Last resort: the newest copy ever committed (these files were committed
+          # before the Actions cache carried them, so an older repository has them
+          # in its history). Stale, but far cheaper than starting from nothing.
+          for f in data/metrics-cache.json data/token-preferences.json \
+                   site/data/catalog.json site/data/catalog-web.json; do
+            [ -s "$f" ] && continue
+            last=$(git log -1 --format=%H --diff-filter=AM -- "$f")
+            if [ -n "$last" ] && git show "$last:$f" > "$f" 2>/dev/null && [ -s "$f" ]; then
+              echo "restored $f from commit ${last:0:7} ($(git log -1 --format=%cs "$last"))"
             else
-              rm -f "$f.download" && echo "$f: not on the live site either, starting without it"
+              rm -f "$f" && echo "$f: nothing committed either, starting without it"
             fi
           done
           # Back to the committed copy, if there is one (a fresh fork has none yet).
