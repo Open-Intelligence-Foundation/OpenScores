@@ -11,7 +11,7 @@
     <header class="topbar">
       <div class="brand">
         <div class="mark" aria-hidden="true">W</div>
-        <div><h1>OpenScores</h1><p>White Score leaderboard for open source AI projects on GitHub</p></div>
+        <div><h1>OpenScores</h1><p>White Score leaderboard for open source AI projects on GitHub · run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a></p></div>
       </div>
       <nav class="nav">
         <a href="./">Leaderboard</a>
@@ -124,7 +124,9 @@ LOAD  = 100 × e^(−(issues + PRs opened in 90 days) / (60 × active maintainer
         <li>Dependency vulnerability data requires repository admin access and is not included; the risk score uses the presence of a security policy instead.</li>
         <li>External engagement is estimated from the maintainer share among the most recent issue and PR authors.</li>
       </ul>
-      <p class="foot">All weights, benchmarks and windows are defined in <code>whitescore/config.py</code> and exported with each data file.</p>
+      <h2>Colour coding</h2>
+      <p>Every score meter on the leaderboard is coloured by its band so that areas of concern stand out: <strong>strong</strong> (70–100) is green, <strong>adequate</strong> (50–69) is the neutral blue, <strong>weak</strong> (25–49) is amber and <strong>concern</strong> (0–24) is red. Risk is read the other way round, because a high risk score is the bad outcome: 0–24 is green (low risk), 25–49 blue (moderate), 50–74 amber (high) and 75–100 red (critical). The number itself always stays in the text colour; the colour is carried by the meter, and the band name appears when hovering a score.</p>
+      <p class="foot">All weights, benchmarks and windows are defined in <code>whitescore/config.py</code> and exported with each data file. OpenScores is run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a>.</p>
     </article>
   </div>
 </body>

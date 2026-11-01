@@ -119,7 +119,8 @@
       if (data.partial) { $("banner").hidden = false; $("banner").textContent = "This catalog is a partial checkpoint: the sweep is still running."; }
       var hash = decodeURIComponent(location.hash.slice(1));
       if (hash && data.category_counts && data.category_counts[hash] != null) state.category = hash;
-      $("foot").textContent = "Catalog generated " + new Date(data.generated_at).toLocaleString() + " · " + fmtInt(data.project_count) + " repositories · OpenScores v" + data.version + " · full data: data/catalog.json";
+      $("foot").innerHTML = "Catalog generated " + new Date(data.generated_at).toLocaleString() + " · " + fmtInt(data.project_count) + " repositories · OpenScores v" + String(data.version).replace(/[<>&]/g, "") + " · full data: data/catalog.json" +
+        ' · run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a>';
       render();
     }).catch(function (err) {
       $("banner").hidden = false;

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OpenScores · White Score leaderboard for open source AI</title>
-  <meta name="description" content="A daily leaderboard of open source AI projects on GitHub, ranked by their White Scores: maturity, health, popularity, risk and sustainability.">
+  <meta name="description" content="A continuously refreshed leaderboard of open source AI projects on GitHub, ranked by their White Scores: maturity, health, popularity, sustainability and risk. Run by the Open Intelligence Foundation.">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232a78d6'/><text x='16' y='22' font-size='16' font-family='system-ui' font-weight='700' text-anchor='middle' fill='white'>W</text></svg>">
 </head>
@@ -15,7 +15,7 @@
         <div class="mark" aria-hidden="true">W</div>
         <div>
           <h1>OpenScores</h1>
-          <p>White Score leaderboard for open source AI projects on GitHub</p>
+          <p>White Score leaderboard for open source AI projects on GitHub · run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a></p>
         </div>
       </div>
       <nav class="nav">
@@ -57,14 +57,14 @@
           <tr>
             <th class="num" data-sort="rank">#</th>
             <th data-sort="name">Project</th>
-            <th class="main" data-sort="overall" title="0.25 maturity + 0.25 health + 0.25 popularity + 0.15 sustainability + 0.10 (100 − risk)">Overall White Score</th>
+            <th class="main" data-sort="overall">Overall White Score</th>
             <th class="num" data-sort="stars">Stars</th>
             <th class="cat-col" data-sort="category">Category</th>
             <th class="sub" data-sort="maturity">Maturity</th>
             <th class="sub" data-sort="health">Health</th>
             <th class="sub" data-sort="popularity">Popularity</th>
             <th class="sub" data-sort="sustainability">Sustainability</th>
-            <th class="sub" data-sort="risk" title="Higher is worse">Risk ↓</th>
+            <th class="sub" data-sort="risk">Risk ↓</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -72,6 +72,15 @@
       <div id="empty" class="empty" hidden>No projects match.</div>
       <div class="more-wrap"><button class="icon-btn" id="more" type="button" hidden>Show more</button></div>
     </section>
+
+    <p class="legend" aria-label="Score colour key">
+      <span class="legend-title">Score colours</span>
+      <span><i class="dot b-strong"></i>Strong 70–100</span>
+      <span><i class="dot b-fair"></i>Adequate 50–69</span>
+      <span><i class="dot b-weak"></i>Weak 25–49</span>
+      <span><i class="dot b-concern"></i>Concern 0–24</span>
+      <span class="legend-note">Risk reads the other way: 0–24 is low risk, 75–100 is critical. Hover a column title for what it measures.</span>
+    </p>
 
     <p class="foot" id="foot"></p>
   </div>

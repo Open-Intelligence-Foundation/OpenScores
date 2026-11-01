@@ -7,6 +7,27 @@
     overall: "Overall", maturity: "Maturity", health: "Health", popularity: "Popularity",
     risk: "Risk", sustainability: "Sustainability"
   };
+  // Tooltip text for every title: what it measures and which direction is good.
+  var DESCRIPTIONS = {
+    overall: "Overall White Score: a weighted blend of all five dimensions (maturity, health and popularity 0.25 each, sustainability 0.15, low risk 0.10). Higher is better.",
+    maturity: "Maturity: structural readiness and governance (releases, documentation, CI and tests, versioning, maintainer base). Higher is better; below 25 is a concern.",
+    health: "Health: current activity and responsiveness (commits, issue and PR response times, closure and merge rates, backlog). Higher is better; below 25 is a concern.",
+    popularity: "Popularity: adoption and community traction (stars, forks, watchers, contributors and their 90-day growth). Higher is better; below 25 is a concern.",
+    sustainability: "Sustainability: long-term viability (active maintainers, contributor diversity and retention, funding, governance, release consistency). Higher is better; below 25 is a concern.",
+    risk: "Risk: dependency and abandonment risk (bus factor, maintainer concentration, commit and release staleness, missing security policy, archived). Lower is better; 75 and above is critical.",
+    rank: "Position by Overall White Score.",
+    name: "Repository owner / name, description and top topics. Click a row for the full breakdown.",
+    category: "Primary category, assigned from the repository's topics and description.",
+    stars: "GitHub stars, with the change over the last 7 days."
+  };
+  // Colour band for a score: higher is better except for risk, where it is inverted.
+  var BANDS = [["strong", "Strong"], ["fair", "Adequate"], ["weak", "Weak"], ["concern", "Concern"]];
+  var RISK_BANDS = [["strong", "Low risk"], ["fair", "Moderate risk"], ["weak", "High risk"], ["concern", "Critical risk"]];
+  function bandOf(key, v) {
+    if (key === "risk") return RISK_BANDS[v < 25 ? 0 : v < 50 ? 1 : v < 75 ? 2 : 3];
+    return BANDS[v >= 70 ? 0 : v >= 50 ? 1 : v >= 25 ? 2 : 3];
+  }
+  function direction(key) { return key === "risk" ? "lower is better" : "higher is better"; }
   var COMPONENT_LABELS = {
     maturity: { age: "Project age", releases: "Release discipline", documentation: "Documentation", governance: "Governance files", ci_tests: "CI & tests", maintainers: "Maintainer base", versioning: "Versioning", compatibility: "Backward compatibility" },
     health: { commit_activity: "Commit activity", issue_response: "Issue responsiveness", pr_response: "PR responsiveness", issue_closure: "Issue closure rate", pr_merge: "PR merge rate", backlog: "Backlog pressure", contributor_diversity: "Contributor diversity", release_freshness: "Release freshness", ci_reliability: "CI reliability" },
@@ -37,6 +58,13 @@
   ];
 
   var board = null, history = null, projects = [];
+  (function () {
+    var ths = document.querySelectorAll("thead th[data-sort]");
+    for (var i = 0; i < ths.length; i++) {
+      var key = ths[i].getAttribute("data-sort");
+      if (DESCRIPTIONS[key]) ths[i].setAttribute("title", DESCRIPTIONS[key]);
+    }
+  })();
   var PAGE = 200;
   var state = { q: "", category: "", language: "", sort: "overall", dir: "desc", selected: null, shown: PAGE };
   var $ = function (id) { return document.getElementById(id); };
@@ -66,7 +94,8 @@
   }
   function scoreCell(p, key) {
     var v = p.scores[key];
-    var risk = key === "risk";
+    var band = bandOf(key, v);
+    var tip = LABELS[key] + " " + v.toFixed(key === "overall" ? 1 : 0) + " · " + (p.bands[key] || band[1]) + " · " + direction(key);
     var delta = "";
     if (key === "overall" && p.delta_7d && typeof p.delta_7d.overall === "number") {
       var d = p.delta_7d.overall;
@@ -75,8 +104,8 @@
       delta = '<span class="d"><span class="delta ' + cls + '" style="margin:0" title="Change over 7 days">' + glyph + " " + Math.abs(d).toFixed(1) + " · 7d</span></span>";
     }
     var main = key === "overall";
-    return '<div class="score ' + key + (main ? "" : " sub") + '"><span class="v">' + (main ? v.toFixed(1) : v.toFixed(0)) + '</span>' +
-      '<div class="meter' + (risk ? " risk" : "") + '" role="img" aria-label="' + LABELS[key] + " " + v + ' out of 100"><i style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></div>' + delta + '</div>';
+    return '<div class="score ' + key + (main ? "" : " sub") + '" title="' + esc(tip) + '"><span class="v">' + (main ? v.toFixed(1) : v.toFixed(0)) + '</span>' +
+      '<div class="meter b-' + band[0] + '" role="img" aria-label="' + esc(tip) + '"><i style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></div>' + delta + '</div>';
   }
   function starsCell(p) {
     var delta = "";
@@ -189,14 +218,13 @@
 
   function componentSection(p, key) {
     var comps = p.scores.components[key], weights = board.weights[key], labels = COMPONENT_LABELS[key];
-    var risk = key === "risk";
     var rows = Object.keys(weights).map(function (k) {
       var v = comps[k];
-      return '<div class="row"><span class="k">' + esc(labels[k] || k) + '</span>' +
-        '<div class="meter' + (risk ? " risk" : "") + '"><i style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></div>' +
+      return '<div class="row" title="' + esc((labels[k] || k) + " " + v.toFixed(0) + " · " + bandOf(key, v)[1] + " · " + direction(key)) + '"><span class="k">' + esc(labels[k] || k) + '</span>' +
+        '<div class="meter b-' + bandOf(key, v)[0] + '"><i style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></div>' +
         '<span class="w">×' + weights[k].toFixed(2) + '</span><span class="v">' + v.toFixed(0) + "</span></div>";
     }).join("");
-    return '<details class="section"' + (key === "maturity" ? " open" : "") + '><summary><span>' + LABELS[key] + " components</span>" +
+    return '<details class="section"' + (key === "maturity" ? " open" : "") + '><summary title="' + esc(DESCRIPTIONS[key]) + '"><span>' + LABELS[key] + " components</span>" +
       '<span class="sum">' + p.scores[key].toFixed(1) + " · " + esc(p.bands[key]) + "</span></summary><div class=\"comp\">" + rows + "</div></details>";
   }
 
@@ -207,8 +235,12 @@
     state.selected = id;
     var m = p.metrics;
     var cards = SCORE_KEYS.slice(1).map(function (k) {
-      return '<div class="card"><div class="label">' + LABELS[k] + '</div><div class="value">' + p.scores[k].toFixed(0) + '</div><div class="band">' + esc(p.bands[k]) + "</div></div>";
+      var band = bandOf(k, p.scores[k]);
+      return '<div class="card" title="' + esc(DESCRIPTIONS[k]) + '"><div class="label">' + LABELS[k] + '</div><div class="value">' + p.scores[k].toFixed(0) + '</div>' +
+        '<div class="meter b-' + band[0] + '"><i style="width:' + Math.max(0, Math.min(100, p.scores[k])) + '%"></i></div>' +
+        '<div class="band">' + esc(p.bands[k]) + "</div></div>";
     }).join("");
+    var overallBand = bandOf("overall", p.scores.overall);
     var series = history ? history[p.full_name] : null;
     var flags = FLAGS.map(function (f) { return '<span class="chip" title="' + f[1] + '">' + (m[f[0]] ? "✓ " : "✗ ") + f[1] + "</span>"; }).join("");
     var metricRows = METRIC_ROWS.map(function (r) {
@@ -225,8 +257,9 @@
       (p.language ? "<span>" + esc(p.language) + "</span>" : "") + (p.license ? "<span>" + esc(p.license) + "</span>" : "") +
       '<a href="' + esc(p.url) + '" target="_blank" rel="noopener">GitHub ↗</a>' +
       (p.homepage ? '<a href="' + esc(p.homepage) + '" target="_blank" rel="noopener">Website ↗</a>' : "") + "</div>" +
-      '<div class="cards"><div class="card overall"><div><div class="label">Overall White Score</div><div class="value">' + p.scores.overall.toFixed(1) + "</div>" +
-      '<div class="band">Maturity, health, popularity 0.25 each · sustainability 0.15 · low risk 0.10</div></div><div>' + sparkline(series, "o") + "</div></div>" + cards + "</div>" +
+      '<div class="cards"><div class="card overall" title="' + esc(DESCRIPTIONS.overall) + '"><div><div class="label">Overall White Score</div><div class="value">' + p.scores.overall.toFixed(1) + "</div>" +
+      '<div class="meter b-' + overallBand[0] + '"><i style="width:' + Math.max(0, Math.min(100, p.scores.overall)) + '%"></i></div>' +
+      '<div class="band">' + overallBand[1] + ' · maturity, health, popularity 0.25 each · sustainability 0.15 · low risk 0.10</div></div><div>' + sparkline(series, "o") + "</div></div>" + cards + "</div>" +
       componentSection(p, "maturity") + componentSection(p, "health") + componentSection(p, "popularity") +
       componentSection(p, "sustainability") + componentSection(p, "risk") +
       '<details class="section"><summary><span>Raw metrics</span><span class="sum">collected ' + fmtDate(m.collected_at) + '</span></summary><div class="comp">' +
@@ -306,7 +339,8 @@
       fillSelect("language", Object.keys(langs).sort());
       $("foot").innerHTML = "Last refreshed " + fmtDate(data.generated_at) + " · " + fmtInt(data.project_count) + " projects · collector v" + esc(data.version) +
         (data.failures && data.failures.length ? " · " + data.failures.length + " repositories could not be collected" : "") +
-        ' · <a href="methodology.html">How scores are computed</a>';
+        ' · <a href="methodology.html">How scores are computed</a>' +
+        ' · OpenScores is run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a>';
       renderTiles();
       renderTable();
       return fetch("data/history.json", { cache: "no-cache" }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; });

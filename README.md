@@ -1,5 +1,7 @@
 # OpenScores
 
+OpenScores is run by the [Open Intelligence Foundation](https://openintelligence.foundation).
+
 A continuously refreshed leaderboard of **open source AI projects on GitHub**, ranked by their
 **White Scores**: five independent 0–100 measures of a project's maturity,
 health, popularity, risk and sustainability. The default ranking is the Overall
