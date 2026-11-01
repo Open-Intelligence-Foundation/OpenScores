@@ -2,7 +2,7 @@
 (function () {
   "use strict";
 
-  var SCORE_KEYS = ["overall", "maturity", "health", "popularity", "risk", "sustainability"];
+  var SCORE_KEYS = ["overall", "maturity", "health", "popularity", "sustainability", "risk"];
   var LABELS = {
     overall: "Overall", maturity: "Maturity", health: "Health", popularity: "Popularity",
     risk: "Risk", sustainability: "Sustainability"
@@ -74,7 +74,8 @@
       var glyph = d > 0.05 ? "▲" : d < -0.05 ? "▼" : "•";
       delta = '<span class="d"><span class="delta ' + cls + '" style="margin:0" title="Change over 7 days">' + glyph + " " + Math.abs(d).toFixed(1) + " · 7d</span></span>";
     }
-    return '<div class="score ' + key + '"><span class="v">' + v.toFixed(0) + '</span>' +
+    var main = key === "overall";
+    return '<div class="score ' + key + (main ? "" : " sub") + '"><span class="v">' + (main ? v.toFixed(1) : v.toFixed(0)) + '</span>' +
       '<div class="meter' + (risk ? " risk" : "") + '" role="img" aria-label="' + LABELS[key] + " " + v + ' out of 100"><i style="width:' + Math.max(0, Math.min(100, v)) + '%"></i></div>' + delta + '</div>';
   }
   function starsCell(p) {
@@ -146,14 +147,14 @@
         '<td class="rank">' + p.rank + "</td>" +
         '<td class="proj"><div class="name"><span class="owner">' + esc(p.owner) + " / </span>" + esc(p.name) + "</div>" +
         '<div class="desc" title="' + esc(p.description) + '">' + esc(p.description) + "</div>" + chips + "</td>" +
-        '<td class="cat">' + esc(p.category) + "</td>" +
+        '<td class="main">' + scoreCell(p, "overall") + "</td>" +
         '<td class="num">' + starsCell(p) + "</td>" +
-        "<td>" + scoreCell(p, "overall") + "</td>" +
-        "<td>" + scoreCell(p, "maturity") + "</td>" +
-        "<td>" + scoreCell(p, "health") + "</td>" +
-        "<td>" + scoreCell(p, "popularity") + "</td>" +
-        "<td>" + scoreCell(p, "risk") + "</td>" +
-        "<td>" + scoreCell(p, "sustainability") + "</td>" +
+        '<td class="cat cat-col">' + esc(p.category) + "</td>" +
+        '<td class="sub">' + scoreCell(p, "maturity") + "</td>" +
+        '<td class="sub">' + scoreCell(p, "health") + "</td>" +
+        '<td class="sub">' + scoreCell(p, "popularity") + "</td>" +
+        '<td class="sub">' + scoreCell(p, "sustainability") + "</td>" +
+        '<td class="sub">' + scoreCell(p, "risk") + "</td>" +
         "</tr>";
     }).join("");
     $("rows").innerHTML = html;
@@ -205,7 +206,7 @@
     if (!p) return;
     state.selected = id;
     var m = p.metrics;
-    var cards = ["maturity", "health", "popularity", "risk", "sustainability"].map(function (k) {
+    var cards = SCORE_KEYS.slice(1).map(function (k) {
       return '<div class="card"><div class="label">' + LABELS[k] + '</div><div class="value">' + p.scores[k].toFixed(0) + '</div><div class="band">' + esc(p.bands[k]) + "</div></div>";
     }).join("");
     var series = history ? history[p.full_name] : null;
@@ -225,9 +226,9 @@
       '<a href="' + esc(p.url) + '" target="_blank" rel="noopener">GitHub ↗</a>' +
       (p.homepage ? '<a href="' + esc(p.homepage) + '" target="_blank" rel="noopener">Website ↗</a>' : "") + "</div>" +
       '<div class="cards"><div class="card overall"><div><div class="label">Overall White Score</div><div class="value">' + p.scores.overall.toFixed(1) + "</div>" +
-      '<div class="band">Mean of maturity, health and popularity</div></div><div>' + sparkline(series, "o") + "</div></div>" + cards + "</div>" +
+      '<div class="band">Maturity, health, popularity 0.25 each · sustainability 0.15 · low risk 0.10</div></div><div>' + sparkline(series, "o") + "</div></div>" + cards + "</div>" +
       componentSection(p, "maturity") + componentSection(p, "health") + componentSection(p, "popularity") +
-      componentSection(p, "risk") + componentSection(p, "sustainability") +
+      componentSection(p, "sustainability") + componentSection(p, "risk") +
       '<details class="section"><summary><span>Raw metrics</span><span class="sum">collected ' + fmtDate(m.collected_at) + '</span></summary><div class="comp">' +
       '<div style="margin:6px 0 10px">' + flags + "</div><table class=\"metrics\">" + metricRows + "</table>" +
       (m.commit_sample_truncated ? '<p class="flag">Commit-based people metrics use the most recent ' + m.commit_sample_size + " commits of the 180-day window.</p>" : "") +

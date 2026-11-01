@@ -40,8 +40,8 @@
         <option value="maturity">Sort: Maturity</option>
         <option value="health">Sort: Health</option>
         <option value="popularity">Sort: Popularity</option>
-        <option value="risk">Sort: Risk (lowest first)</option>
         <option value="sustainability">Sort: Sustainability</option>
+        <option value="risk">Sort: Risk (lowest first)</option>
         <option value="stars">Sort: Stars</option>
         <option value="delta">Sort: 7-day movers</option>
       </select>
@@ -50,18 +50,21 @@
 
     <section class="table-wrap">
       <table id="board">
+        <colgroup>
+          <col class="c-rank"><col class="c-proj"><col class="c-main"><col class="c-stars"><col class="c-cat"><col class="c-sub" span="5">
+        </colgroup>
         <thead>
           <tr>
             <th class="num" data-sort="rank">#</th>
             <th data-sort="name">Project</th>
-            <th data-sort="category">Category</th>
+            <th class="main" data-sort="overall" title="0.25 maturity + 0.25 health + 0.25 popularity + 0.15 sustainability + 0.10 (100 − risk)">Overall White Score</th>
             <th class="num" data-sort="stars">Stars</th>
-            <th data-sort="overall" title="0.25 maturity + 0.25 health + 0.25 popularity + 0.15 sustainability + 0.10 (100 − risk)">Overall</th>
-            <th data-sort="maturity">Maturity</th>
-            <th data-sort="health">Health</th>
-            <th data-sort="popularity">Popularity</th>
-            <th data-sort="risk" title="Higher is worse">Risk ↓</th>
-            <th data-sort="sustainability">Sustainability</th>
+            <th class="cat-col" data-sort="category">Category</th>
+            <th class="sub" data-sort="maturity">Maturity</th>
+            <th class="sub" data-sort="health">Health</th>
+            <th class="sub" data-sort="popularity">Popularity</th>
+            <th class="sub" data-sort="sustainability">Sustainability</th>
+            <th class="sub" data-sort="risk" title="Higher is worse">Risk ↓</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>

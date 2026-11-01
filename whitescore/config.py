@@ -139,14 +139,16 @@ INCLUDE_CURATED_LISTS = env_bool("INCLUDE_CURATED_LISTS", False)  # track awesom
 MAX_REPOS = env_int("MAX_REPOS", 1000)          # cap on tracked repos per run
 # Incremental collection (see incremental.py): every repo gets a full collection
 # at least every FULL_REFRESH_DAYS days, at most MAX_FULL_COLLECT of them per run
-# (-1 = unlimited); the others reuse cached metrics plus a light daily refresh.
-FULL_REFRESH_DAYS = env_float("FULL_REFRESH_DAYS", 3)
-MAX_FULL_COLLECT = env_int("MAX_FULL_COLLECT", 500)
+# (-1 = unlimited); the others reuse cached metrics plus a light refresh.  The
+# refresh workflow runs four times a day, so 1,000 repositories at one full
+# collection a day means ~250 per run; 300 leaves room for new arrivals.
+FULL_REFRESH_DAYS = env_float("FULL_REFRESH_DAYS", 1)
+MAX_FULL_COLLECT = env_int("MAX_FULL_COLLECT", 300)
 LIGHT_BATCH = env_int("LIGHT_BATCH", 50)         # repositories per light-refresh GraphQL request
 PAGES_PER_TOPIC = env_int("PAGES_PER_TOPIC", 2)  # 100 results per page
 REQUIRE_RECOGNIZED_LICENSE = env_bool("REQUIRE_RECOGNIZED_LICENSE", True)
 MAX_COMMIT_PAGES = env_int("MAX_COMMIT_PAGES", 5)  # 100 commits per page
-WORKERS = env_int("WORKERS", 3)
+WORKERS = env_int("WORKERS", 6)                 # concurrent repositories; well under GitHub's 100-concurrent-request limit
 HISTORY_MAX_POINTS = env_int("HISTORY_MAX_POINTS", 120)  # ~4 months of daily points per project
 
 # Category rules. Each category lists topics (weight 2) and description keywords

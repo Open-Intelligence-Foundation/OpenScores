@@ -9,7 +9,8 @@ from whitescore import collect, config, pipeline
 
 
 class FakeGitHubClient:
-    def __init__(self, *a, **kw):
+    def __init__(self, token=None, *a, **kw):
+        self.token = token or "primary-token"
         self.requests_made = 0
         self.graphql_points_used = 0
 
@@ -39,6 +40,8 @@ def test_two_runs_use_cache_and_light_refresh(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "LEADERBOARD_PATH", tmp_path / "leaderboard.json")
     monkeypatch.setattr(pipeline, "HISTORY_PATH", tmp_path / "history.json")
     monkeypatch.setattr(pipeline, "CACHE_PATH", tmp_path / "cache" / "metrics-cache.json")
+    monkeypatch.setattr(pipeline, "TOKEN_PREFS_PATH", tmp_path / "cache" / "token-preferences.json")
+    monkeypatch.delenv("GITHUB_TOKEN_FALLBACK", raising=False)
 
     # run 1: nothing cached, budget of two full collections -> third repo deferred
     board = pipeline.run(max_repos=3, max_full=2)
@@ -72,6 +75,47 @@ def test_explicit_repos_always_collect_fully(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "collect_repo", lambda client, name, now: (collected.append(name), metrics_for(name))[1])
     monkeypatch.setattr(pipeline, "fetch_light", lambda client, names: {})
     monkeypatch.setattr(pipeline, "CACHE_PATH", tmp_path / "metrics-cache.json")
+    monkeypatch.setattr(pipeline, "TOKEN_PREFS_PATH", tmp_path / "token-preferences.json")
+    monkeypatch.delenv("GITHUB_TOKEN_FALLBACK", raising=False)
     board = pipeline.run(repos=["b/x", "b/y"], dry_run=True)
     assert collected == ["b/x", "b/y"] and board["project_count"] == 2
     assert not (tmp_path / "metrics-cache.json").exists()      # dry run writes nothing
+
+
+def test_fallback_token_rescues_repositories_the_primary_may_not_read(tmp_path, monkeypatch):
+    """One organization refuses the classic token: its repository is collected with the
+    fallback, remembered on disk, and the next run's light refresh asks the fallback for it."""
+    from whitescore import tokens
+    from whitescore.collect import RepositoryForbidden
+    light_calls = []
+
+    def fake_collect(client, name, now):
+        if client.token == "classic" and name.startswith("saml-org/"):
+            raise RepositoryForbidden(name, [{"type": "FORBIDDEN", "path": ["repository"], "message": "SAML"}])
+        return metrics_for(name)
+
+    monkeypatch.setenv("GITHUB_TOKEN_FALLBACK", "fine-grained")
+    monkeypatch.setattr(pipeline, "GitHubClient", lambda *a, **kw: FakeGitHubClient("classic"))
+    monkeypatch.setattr(tokens, "GitHubClient", FakeGitHubClient)
+    monkeypatch.setattr(pipeline, "collect_repo", fake_collect)
+    monkeypatch.setattr(pipeline, "fetch_light",
+                        lambda client, names: (light_calls.append((client.token, sorted(names))), {})[1])
+    monkeypatch.setattr(pipeline, "catalog_candidates",
+                        lambda min_stars: {"saml-org/tool": {"stars": 300, "topics": []}, "open/one": {"stars": 200, "topics": []}})
+    monkeypatch.setattr(pipeline, "load_seed_file", lambda: [])
+    monkeypatch.setattr(config, "SEED_REPOS", [])
+    monkeypatch.setattr(pipeline, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(pipeline, "LEADERBOARD_PATH", tmp_path / "leaderboard.json")
+    monkeypatch.setattr(pipeline, "HISTORY_PATH", tmp_path / "history.json")
+    monkeypatch.setattr(pipeline, "CACHE_PATH", tmp_path / "data" / "metrics-cache.json")
+    prefs = tmp_path / "data" / "token-preferences.json"
+    monkeypatch.setattr(pipeline, "TOKEN_PREFS_PATH", prefs)
+
+    board = pipeline.run(max_repos=2, max_full=-1)
+    assert board["failures"] == [] and board["project_count"] == 2
+    assert json.loads(prefs.read_text())["fallback_repos"].keys() == {"saml-org/tool"}
+
+    # run 2: both are fresh in the cache; the light refresh is split by token
+    board = pipeline.run(max_repos=2, max_full=-1)
+    assert board["project_count"] == 2
+    assert sorted(light_calls) == [("classic", ["open/one"]), ("fine-grained", ["saml-org/tool"])]

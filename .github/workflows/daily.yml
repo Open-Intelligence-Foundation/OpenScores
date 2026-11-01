@@ -1,8 +1,13 @@
-name: Daily White Score refresh
+name: White Score refresh
 
+# Four runs a day. Each fully recollects the ~250 repositories whose cached
+# metrics are a day old (about 2,600 requests, inside one hour of a personal
+# token's 5,000/hour budget) and refreshes the other ~750 with 15 light GraphQL
+# requests, so every project is fully recollected daily and its stars, forks,
+# issues, pull requests and last commit are at most six hours old.
 on:
   schedule:
-    - cron: "17 6 * * *"        # once a day, 06:17 UTC
+    - cron: "17 */6 * * *"      # 00:17, 06:17, 12:17, 18:17 UTC
   workflow_dispatch:
     inputs:
       max_repos:
@@ -10,7 +15,7 @@ on:
         default: "1000"
       max_full:
         description: "Full (expensive) collections this run; the rest refresh from cache (-1 = all due)"
-        default: "500"
+        default: "300"
 
 permissions:
   contents: write
@@ -24,7 +29,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -39,12 +44,17 @@ jobs:
       # the "Weekly catalog sweep" workflow refreshes (catalog.yml).
       - name: Collect and score
         env:
-          # A classic or fine-grained PAT (public repo read access) gets the full
-          # 5,000 req/h budget. The default GITHUB_TOKEN works but is limited to
-          # 1,000 req/h, so lower MAX_FULL_COLLECT if you rely on it.
+          # Primary token: a classic PAT (public_repo scope) reads everything,
+          # including Sponsors data and the stargazer timeline, with a 5,000
+          # requests/hour budget. The default GITHUB_TOKEN works but is limited
+          # to 1,000 req/h, so lower MAX_FULL_COLLECT if you rely on it.
           GITHUB_TOKEN: ${{ secrets.WHITESCORE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          # Optional fallback: a fine-grained PAT for repositories whose
+          # organization refuses classic tokens. Repositories that needed it are
+          # remembered in data/token-preferences.json.
+          GITHUB_TOKEN_FALLBACK: ${{ secrets.WHITESCORE_GITHUB_TOKEN_FALLBACK }}
           MAX_REPOS: ${{ github.event.inputs.max_repos || '1000' }}
-          MAX_FULL_COLLECT: ${{ github.event.inputs.max_full || '500' }}
+          MAX_FULL_COLLECT: ${{ github.event.inputs.max_full || '300' }}
         run: python -m whitescore
 
       - name: Commit updated data
@@ -55,7 +65,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No data changes"
           else
-            git commit -m "data: daily White Score refresh $(date -u +%Y-%m-%d)"
+            git commit -m "data: White Score refresh $(date -u '+%Y-%m-%d %H:%M UTC')"
             git pull --rebase origin main
             git push
           fi

@@ -12,11 +12,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from . import __version__, config
-from .collect import collect_repo
+from .collect import RepositoryForbidden, collect_repo
 from .discover import discover, select_repos
 from .github import GitHubClient, GitHubError
 from .incremental import apply_light, fetch_light, load_cache, plan_collection, prune_cache, save_cache
 from .scoring import interpret, score_all
+from .tokens import TokenPool, build_pool, save_preferences
 
 log = logging.getLogger("whitescore.pipeline")
 
@@ -27,6 +28,7 @@ HISTORY_PATH = DATA_DIR / "history.json"
 SEED_FILE = ROOT / "seed_repos.txt"
 CATALOG_PATH = DATA_DIR / "catalog.json"
 CACHE_PATH = ROOT / "data" / "metrics-cache.json"   # committed, not served
+TOKEN_PREFS_PATH = ROOT / "data" / "token-preferences.json"   # repos that need the fallback token
 
 
 def load_seed_file() -> List[str]:
@@ -109,6 +111,27 @@ def build_project(metrics: dict) -> dict:
     }
 
 
+def collect_with_fallback(pool: TokenPool, full_name: str, now: datetime, stamp: str) -> Optional[dict]:
+    """collect_repo with the pool's tokens in preference order.  A repository
+    the first token may not read is retried with the other; whichever worked
+    is remembered for later runs.  Raises RepositoryForbidden when every token
+    is refused."""
+    denied: Optional[RepositoryForbidden] = None
+    for which, client in pool.clients_for(full_name):
+        try:
+            metrics = collect_repo(client, full_name, now)
+        except RepositoryForbidden as exc:
+            if denied is None and pool.has_fallback:
+                log.info("%s: the %s token was refused; retrying with the other token", full_name, which)
+            denied = exc
+            continue
+        if metrics is not None:
+            pool.remember(metrics["full_name"], which, stamp)
+        return metrics
+    assert denied is not None
+    raise denied
+
+
 def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_run: bool = False,
         max_full: Optional[int] = None) -> dict:
     started = time.time()
@@ -116,6 +139,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
     now = datetime.now(timezone.utc)
     day = now.strftime("%Y-%m-%d")
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    token_pool = build_pool(client, TOKEN_PREFS_PATH)
     max_repos = max_repos or config.MAX_REPOS
 
     if repos:
@@ -153,7 +177,12 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
 
     def work(full_name: str) -> Optional[dict]:
         try:
-            metrics = collect_repo(client, full_name, now)
+            metrics = collect_with_fallback(token_pool, full_name, now, stamp)
+        except RepositoryForbidden as exc:
+            hint = "" if token_pool.has_fallback else \
+                " (set GITHUB_TOKEN_FALLBACK to a token of the other kind to retry such repositories)"
+            log.error("%s%s", exc, hint)
+            return None
         except GitHubError as exc:
             log.error("%s: %s", full_name, exc)
             return None
@@ -179,10 +208,15 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
                     failures.append(futures[fut])
                 if i % 25 == 0 or i == len(futures):
                     log.info("progress %d/%d (requests=%d, graphql points=%d)", i, len(futures),
-                             client.requests_made, client.graphql_points_used)
+                             *token_pool.request_totals())
+        if token_pool.learned:
+            log.info("%d repositories newly remembered as needing the fallback token", token_pool.learned)
 
     if reuse:
-        light = fetch_light(client, reuse)
+        primary_names, fallback_names = token_pool.split(reuse)
+        light = fetch_light(client, primary_names) if primary_names else {}
+        if fallback_names:
+            light.update(fetch_light(token_pool.fallback, fallback_names))
         for name in reuse:
             entry = cache.get(name.lower())
             if not entry:
@@ -192,7 +226,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             entry["metrics"] = metrics
             projects.append(build_project(merge_topics(dict(metrics))))
         log.info("refreshed %d cached repositories with %d light payloads (requests=%d, graphql points=%d)",
-                 len(reuse) - len(deferred), len(light), client.requests_made, client.graphql_points_used)
+                 len(reuse) - len(deferred), len(light), *token_pool.request_totals())
         if deferred:
             log.info("%d repositories have no cached metrics yet and wait for the next run", len(deferred))
 
@@ -243,10 +277,12 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         LEADERBOARD_PATH.write_text(json.dumps(leaderboard, separators=(",", ":")))
         HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
         save_cache(CACHE_PATH, prune_cache(cache, targets, now))
+        save_preferences(TOKEN_PREFS_PATH, token_pool, keep=None if repos else targets)
         log.info("wrote %s (%d projects), %s and %s", LEADERBOARD_PATH, len(projects), HISTORY_PATH, CACHE_PATH)
 
+    requests_made, points = token_pool.request_totals()
     log.info("done in %.0fs; %d requests, %d graphql points, %d failures",
-             time.time() - started, client.requests_made, client.graphql_points_used, len(failures))
+             time.time() - started, requests_made, points, len(failures))
     if failures and not projects:
         log.error("Every repository failed to collect. The first 'not found or inaccessible' "
                   "warnings above carry the GraphQL error returned by GitHub; check the token's "

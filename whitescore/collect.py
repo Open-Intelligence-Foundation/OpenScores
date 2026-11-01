@@ -281,6 +281,27 @@ def fetch_ci_stats(client: GitHubClient, full_name: str, now: datetime) -> Optio
 
 
 FORBIDDEN_TYPES = ("FORBIDDEN", "INSUFFICIENT_SCOPES")
+
+
+class RepositoryForbidden(GitHubError):
+    """The token may not read the repository at all (an organization token
+    policy or SAML enforcement), as opposed to a missing repository or a
+    single refused field. The caller may retry with a different token."""
+
+    def __init__(self, full_name: str, errors: List[dict]):
+        super().__init__("%s: this token is not allowed to read the repository%s"
+                         % (full_name, describe_errors(errors, limit=1)))
+        self.full_name = full_name
+        self.errors = errors
+
+
+def repository_denied(errors: List[dict]) -> bool:
+    """True when GitHub refused the repository itself, not just a field of it."""
+    for err in errors:
+        path = err.get("path") or []
+        if err.get("type") in FORBIDDEN_TYPES and (not path or list(path) == ["repository"]):
+            return True
+    return False
 STAR_JSON = {"Accept": "application/vnd.github.star+json"}
 
 
@@ -373,6 +394,8 @@ def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] =
 
     repo, errors = fetch_core(client, {"owner": owner, "name": name, "since180": since180, "since90": since90})
     if not repo:
+        if repository_denied(errors):
+            raise RepositoryForbidden(full_name, errors)
         log.warning("Repository %s not found or inaccessible%s", full_name, describe_errors(errors))
         return None
     full_name = repo["nameWithOwner"]  # canonical casing / renames
