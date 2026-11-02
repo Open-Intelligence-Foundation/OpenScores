@@ -18,7 +18,7 @@ from . import config
 from .discover import categorize
 from .github import GitHubClient, GitHubError, describe_errors
 from .queries import (COUNTS, MORE_HISTORY, REMOVABLE_CORE_FIELDS, REPO_EXTRAS, REPO_SPONSORS,
-                      build_repo_core)
+                      build_repo_core, selection_at_line)
 
 log = logging.getLogger("whitescore.collect")
 
@@ -312,20 +312,36 @@ def fetch_core(client: GitHubClient, variables: dict) -> Tuple[Optional[dict], L
     errors: List[dict] = []
     for _ in range(len(REMOVABLE_CORE_FIELDS) + 1):
         excluded = client.disabled_fields("repository")
-        data, errors = client.graphql_full(build_repo_core(excluded), variables)
+        document = build_repo_core(excluded)
+        data, errors = client.graphql_full(document, variables)
         repo = data.get("repository")
         if repo:
             return repo, errors
         dropped = False
         for err in errors:
-            path = err.get("path") or []
-            if (err.get("type") in FORBIDDEN_TYPES and len(path) > 1 and path[0] == "repository"
-                    and path[1] in REMOVABLE_CORE_FIELDS and path[1] not in excluded):
-                client.disable_field("repository", path[1], describe_errors([err], limit=1))
+            field = refused_selection(err, document)
+            if field in REMOVABLE_CORE_FIELDS and field not in excluded:
+                client.disable_field("repository", field, describe_errors([err], limit=1))
                 dropped = True
         if not dropped:
             break
     return None, errors
+
+
+def refused_selection(err: dict, document: str) -> Optional[str]:
+    """The top-level repository selection a FORBIDDEN / INSUFFICIENT_SCOPES
+    error refers to.  FORBIDDEN errors name it in their path; INSUFFICIENT_SCOPES
+    errors (a classic token lacking a scope) carry only a source location."""
+    if err.get("type") not in FORBIDDEN_TYPES:
+        return None
+    path = err.get("path") or []
+    if path:
+        return path[1] if len(path) > 1 and path[0] == "repository" else None
+    for loc in err.get("locations") or []:
+        field = selection_at_line(document, int(loc.get("line") or 0))
+        if field:
+            return field
+    return None
 
 
 def _last_page(link_header: str) -> int:
@@ -496,8 +512,13 @@ def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],
     has_tests = bool(root_dirs & TEST_DIRS) or bool(root_files & TEST_FILES)
     has_ci = bool(wf_files) or bool(root_files & CI_FILES) or bool(root_dirs & {".circleci", ".buildkite"})
 
-    issue_templates = list(repo.get("issueTemplates") or [])
-    has_issue_templates = bool(issue_templates) or "issue_template" in gh_dirs or "issue_template.md" in gh_files
+    # Templates are read from the file tree: .github/ISSUE_TEMPLATE/, a
+    # template file in .github, the repository root or docs/ (the GraphQL
+    # issueTemplates field needs the classic `repo` scope).
+    docs_dirs, docs_files = _entry_names(repo.get("docsDir"))
+    has_issue_templates = bool(repo.get("issueTemplates")) \
+        or "issue_template" in (gh_dirs | root_dirs | docs_dirs) \
+        or any("issue_template" in f for f in gh_files | root_files | docs_files)
 
     owner = repo.get("owner") or {}
     owner_is_org = owner.get("__typename") == "Organization"

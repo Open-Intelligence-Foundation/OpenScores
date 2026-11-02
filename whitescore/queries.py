@@ -1,5 +1,6 @@
 """GraphQL documents used by the collector (kept separate so they can be
 validated against GitHub's public schema in tests)."""
+import re
 
 DISCOVER = """
 query Discover($q: String!, $after: String) {
@@ -49,8 +50,9 @@ REPO_CORE_FIELDS = [
     ("codeOfConduct", "codeOfConduct { key name }"),
     ("contributingGuidelines", "contributingGuidelines { url }"),
     ("isSecurityPolicyEnabled", "isSecurityPolicyEnabled"),
-    ("issueTemplates", "issueTemplates { name }"),
-    ("pullRequestTemplates", "pullRequestTemplates { filename }"),
+    # issueTemplates / pullRequestTemplates are deliberately absent: GitHub
+    # gates them behind the classic `repo` scope (public_repo is refused), and
+    # the .github tree listing below already shows the template files.
     ("openIssues", "openIssues: issues(states: OPEN) { totalCount }"),
     ("openPRs", "openPRs: pullRequests(states: OPEN) { totalCount }"),
     ("defaultBranchRef", """defaultBranchRef {
@@ -126,6 +128,27 @@ def build_repo_core(exclude=()):
 
 
 REPO_CORE = build_repo_core()
+
+
+def selection_at_line(document, line_no):
+    """Response name of the top-level `repository` selection that contains
+    line ``line_no`` (1-based) of a RepoCore document, or None.
+
+    GitHub reports INSUFFICIENT_SCOPES errors with a source location but no
+    response path, and nulls the whole response, so the location is the only
+    way to find out which selection the token may not read."""
+    depth = 0
+    current = None
+    for i, text in enumerate(document.splitlines(), 1):
+        stripped = text.strip()
+        if depth == 2 and stripped and not stripped.startswith("}"):
+            m = re.match(r"([A-Za-z_][A-Za-z0-9_]*)", stripped)
+            if m:
+                current = m.group(1)
+        if i == line_no:
+            return current if depth >= 2 else None
+        depth += text.count("{") - text.count("}")
+    return None
 
 # Fields that some token types are not allowed to read.  GitHub Sponsors data
 # (hasSponsorsListing) is off-limits to fine-grained personal access tokens,

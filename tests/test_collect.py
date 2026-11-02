@@ -320,3 +320,43 @@ def test_parse_dt_accepts_offsets_and_fractions():
     assert collect.parse_dt("2025-02-03T14:29:39.123Z") == datetime(2025, 2, 3, 14, 29, 39, 123000, tzinfo=timezone.utc)
     assert collect.parse_dt(None) is None and collect.parse_dt("") is None
     assert collect.parse_dt("not a date") is None
+
+
+def test_fetch_core_drops_a_selection_refused_by_scope_using_its_location():
+    """A classic token without the `repo` scope: GitHub answers INSUFFICIENT_SCOPES
+    with a source location, no path, and a null response."""
+    from whitescore.queries import build_repo_core, selection_at_line
+
+    class ScopeClient(FakeClient):
+        def graphql_full(self, query, variables=None):
+            self.calls += 1
+            if "recentIssues" in query:
+                line = next(i for i, l in enumerate(query.splitlines(), 1) if "createdAt closedAt" in l)
+                return {}, [{"type": "INSUFFICIENT_SCOPES", "locations": [{"line": line, "column": 9}],
+                             "message": "The 'closedAt' field requires one of the following scopes: ['repo']"}]
+            return {"repository": {"nameWithOwner": "a/b"}}, []
+
+    client = ScopeClient()
+    repo, errors = collect.fetch_core(client, {"owner": "a", "name": "b"})
+    assert repo == {"nameWithOwner": "a/b"} and client.fields == {"recentIssues"} and client.calls == 2
+    doc = build_repo_core()
+    assert selection_at_line(doc, 1) is None                                  # the query line itself
+    assert selection_at_line(doc, next(i for i, l in enumerate(doc.splitlines(), 1) if "tagger" in l)) == "tags"
+    assert not collect.repository_denied([{"type": "INSUFFICIENT_SCOPES", "path": ["repository", "x"]}])
+
+
+def test_issue_templates_are_read_from_the_file_tree():
+    counts = {k: 1 for k in ("issuesOpened", "issuesClosed", "prsOpened", "prsMerged", "prsClosed", "staleIssues", "breaking")}
+
+    def has_templates(repo):
+        return collect.build_metrics(repo, [], counts, 0, None, NOW)["has_issue_templates"]
+
+    repo = fake_repo()
+    repo.pop("issueTemplates", None)
+    repo["dotgithub"] = {"entries": [{"name": "workflows", "type": "tree"}]}
+    assert not has_templates(repo)
+    repo["dotgithub"] = {"entries": [{"name": "ISSUE_TEMPLATE", "type": "tree"}]}
+    assert has_templates(repo)
+    repo["dotgithub"] = None
+    repo["docsDir"] = {"entries": [{"name": "issue_template.md", "type": "blob"}]}
+    assert has_templates(repo)

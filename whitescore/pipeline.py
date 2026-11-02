@@ -211,6 +211,13 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
                              *token_pool.request_totals())
         if token_pool.learned:
             log.info("%d repositories newly remembered as needing the fallback token", token_pool.learned)
+        # A repository that could not be collected this run keeps its place on
+        # the board with its last cached metrics (light-refreshed like the
+        # others) instead of disappearing until a later run succeeds.
+        kept = [name for name in failures if name.lower() in cache]
+        if kept:
+            log.warning("%d repositories could not be collected this run; keeping their cached metrics", len(kept))
+            reuse = list(reuse) + kept
 
     if reuse:
         primary_names, fallback_names = token_pool.split(reuse)

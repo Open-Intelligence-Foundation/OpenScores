@@ -119,3 +119,37 @@ def test_fallback_token_rescues_repositories_the_primary_may_not_read(tmp_path, 
     board = pipeline.run(max_repos=2, max_full=-1)
     assert board["project_count"] == 2
     assert sorted(light_calls) == [("classic", ["open/one"]), ("fine-grained", ["saml-org/tool"])]
+
+
+def test_a_failed_collection_keeps_the_cached_project_on_the_board(tmp_path, monkeypatch):
+    """Run 1 collects both repositories; in run 2 one of them cannot be collected
+    (a token problem, an API hiccup): it stays on the board with its cached metrics."""
+    broken = set()
+
+    def fake_collect(client, name, now):
+        if name in broken:
+            raise collect.GitHubError("GraphQL error: INSUFFICIENT_SCOPES")
+        return metrics_for(name)
+
+    monkeypatch.setattr(pipeline, "GitHubClient", FakeGitHubClient)
+    monkeypatch.setattr(pipeline, "collect_repo", fake_collect)
+    monkeypatch.setattr(pipeline, "fetch_light", lambda client, names: {})
+    monkeypatch.setattr(pipeline, "catalog_candidates",
+                        lambda min_stars: {"a/one": {"stars": 300, "topics": []}, "a/two": {"stars": 200, "topics": []}})
+    monkeypatch.setattr(pipeline, "load_seed_file", lambda: [])
+    monkeypatch.setattr(config, "SEED_REPOS", [])
+    monkeypatch.setattr(config, "FULL_REFRESH_DAYS", 0)          # everything is due every run
+    monkeypatch.setattr(pipeline, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(pipeline, "LEADERBOARD_PATH", tmp_path / "leaderboard.json")
+    monkeypatch.setattr(pipeline, "HISTORY_PATH", tmp_path / "history.json")
+    monkeypatch.setattr(pipeline, "CACHE_PATH", tmp_path / "cache" / "metrics-cache.json")
+    monkeypatch.setattr(pipeline, "TOKEN_PREFS_PATH", tmp_path / "cache" / "token-preferences.json")
+    monkeypatch.delenv("GITHUB_TOKEN_FALLBACK", raising=False)
+
+    assert pipeline.run(max_repos=2, max_full=-1)["project_count"] == 2
+    broken.add("a/one")
+    board = pipeline.run(max_repos=2, max_full=-1)
+    assert board["failures"] == ["a/one"]
+    assert board["project_count"] == 2                            # still on the board
+    kept = next(p for p in board["projects"] if p["full_name"] == "a/one")
+    assert kept["metrics"]["from_cache"] is True

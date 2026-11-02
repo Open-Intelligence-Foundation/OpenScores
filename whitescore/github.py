@@ -179,8 +179,10 @@ class GitHubClient:
                     self._sleep_until(float(reset) if reset else time.time() + 60)
                     continue
                 # NOT_FOUND on optional sub-fields (e.g. missing README) is fine:
-                # GraphQL still returns partial data. Only fail on hard errors.
-                hard = [e for e in errors if e.get("type") not in ("NOT_FOUND", "FORBIDDEN")]
+                # GraphQL still returns partial data. FORBIDDEN and
+                # INSUFFICIENT_SCOPES are left to the caller, which can drop
+                # the refused selection and retry. Only fail on hard errors.
+                hard = [e for e in errors if e.get("type") not in ("NOT_FOUND", "FORBIDDEN", "INSUFFICIENT_SCOPES")]
                 if hard and not payload.get("data"):
                     raise GitHubError("GraphQL error: %s" % hard[:2])
                 if hard:

@@ -156,7 +156,12 @@ Tests:
 1. Push this repository to GitHub.
 2. In **Settings → Pages**, set the source to **GitHub Actions**.
 3. (Recommended) add a repository secret `WHITESCORE_GITHUB_TOKEN` containing a
-   classic personal access token with the `public_repo` scope. Without it the
+   classic personal access token with the `public_repo` scope. That scope is
+   enough: the collector does not ask for anything that needs the broader
+   `repo` scope (GitHub's issue and pull request template fields do, so
+   templates are detected from the repository's file tree instead, and any
+   other selection a token's scopes refuse is dropped for the run and the
+   repository retried without it). Without the secret the
    workflow falls back to the built-in `GITHUB_TOKEN`, which is capped at 1,000
    API requests per hour, so set `MAX_FULL_COLLECT` to roughly 80 or lower.
    If a run logs `not found or inaccessible` for every repository, the message
