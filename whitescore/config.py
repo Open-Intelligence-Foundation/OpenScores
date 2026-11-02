@@ -136,14 +136,14 @@ SEED_REPOS = [
 MIN_STARS = env_int("MIN_STARS", 500)           # discovery threshold for the leaderboard
 CATALOG_MIN_STARS = env_int("CATALOG_MIN_STARS", 200)  # threshold for the full catalog sweep
 INCLUDE_CURATED_LISTS = env_bool("INCLUDE_CURATED_LISTS", False)  # track awesome-lists on the leaderboard?
-MAX_REPOS = env_int("MAX_REPOS", 1000)          # cap on tracked repos per run
+MAX_REPOS = env_int("MAX_REPOS", 2000)          # cap on tracked repos per run
 # Incremental collection (see incremental.py): every repo gets a full collection
 # at least every FULL_REFRESH_DAYS days, at most MAX_FULL_COLLECT of them per run
 # (-1 = unlimited); the others reuse cached metrics plus a light refresh.  The
-# refresh workflow runs four times a day, so 1,000 repositories at one full
-# collection a day means ~250 per run; 300 leaves room for new arrivals.
+# refresh workflow runs six times a day, so 2,000 repositories at one full
+# collection a day means ~335 per run; 350 leaves room for new arrivals.
 FULL_REFRESH_DAYS = env_float("FULL_REFRESH_DAYS", 1)
-MAX_FULL_COLLECT = env_int("MAX_FULL_COLLECT", 300)
+MAX_FULL_COLLECT = env_int("MAX_FULL_COLLECT", 350)
 LIGHT_BATCH = env_int("LIGHT_BATCH", 50)         # repositories per light-refresh GraphQL request
 PAGES_PER_TOPIC = env_int("PAGES_PER_TOPIC", 2)  # 100 results per page
 REQUIRE_RECOGNIZED_LICENSE = env_bool("REQUIRE_RECOGNIZED_LICENSE", True)

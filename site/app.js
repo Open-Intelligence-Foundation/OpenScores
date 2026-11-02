@@ -65,9 +65,23 @@
       if (DESCRIPTIONS[key]) ths[i].setAttribute("title", DESCRIPTIONS[key]);
     }
   })();
-  var PAGE = 200;
-  var state = { q: "", category: "", language: "", sort: "overall", dir: "desc", selected: null, shown: PAGE };
+  // Paging: 50 rows a page by default; the viewer can pick a bigger page or
+  // all rows, and the choice is remembered in this browser.
+  var PAGE_SIZES = [50, 100, 250, 500];
+  var DEFAULT_PAGE_SIZE = 50;
+  var state = { q: "", category: "", language: "", sort: "overall", dir: "desc", selected: null, page: 1, pageSize: loadPageSize() };
   var $ = function (id) { return document.getElementById(id); };
+  function loadPageSize() {
+    try {
+      var saved = localStorage.getItem("pageSize");
+      if (saved === "all") return Infinity;
+      if (saved && PAGE_SIZES.indexOf(Number(saved)) !== -1) return Number(saved);
+    } catch (err) { /* ignore */ }
+    return DEFAULT_PAGE_SIZE;
+  }
+  function savePageSize(size) {
+    try { localStorage.setItem("pageSize", size === Infinity ? "all" : String(size)); } catch (err) { /* ignore */ }
+  }
 
   // ---------------------------------------------------------------- utils
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -165,12 +179,17 @@
 
   function renderTable() {
     var list = visibleProjects();
-    $("count").textContent = list.length + " of " + projects.length + " projects";
+    $("count").textContent = fmtInt(list.length) + " of " + fmtInt(projects.length) + " projects";
     $("empty").hidden = list.length > 0;
-    var remaining = list.length - state.shown;
-    $("more").hidden = remaining <= 0;
-    if (remaining > 0) $("more").textContent = "Show more (" + fmtInt(Math.min(PAGE, remaining)) + " of " + fmtInt(remaining) + " remaining)";
-    var html = list.slice(0, state.shown).map(function (p) {
+    var size = state.pageSize === Infinity ? Math.max(1, list.length) : state.pageSize;
+    var pages = Math.max(1, Math.ceil(list.length / size));
+    state.page = Math.min(Math.max(1, state.page), pages);
+    var start = (state.page - 1) * size, end = Math.min(list.length, start + size);
+    $("pager").hidden = pages <= 1;
+    $("pageinfo").textContent = "Page " + fmtInt(state.page) + " of " + fmtInt(pages) + " · rows " + fmtInt(start + 1) + "–" + fmtInt(end);
+    $("first").disabled = $("prev").disabled = state.page <= 1;
+    $("next").disabled = $("last").disabled = state.page >= pages;
+    var html = list.slice(start, end).map(function (p) {
       var chips = (p.topics || []).slice(0, 4).map(function (t) { return '<span class="chip">' + esc(t) + "</span>"; }).join("");
       return '<tr tabindex="0" data-id="' + esc(p.full_name) + '">' +
         '<td class="rank">' + p.rank + "</td>" +
@@ -285,12 +304,24 @@
 
   // ---------------------------------------------------------------- wiring
   function wire() {
-    $("q").addEventListener("input", function (e) { state.q = e.target.value; state.shown = PAGE; renderTable(); });
-    $("category").addEventListener("change", function (e) { state.category = e.target.value; state.shown = PAGE; renderTable(); });
-    $("language").addEventListener("change", function (e) { state.language = e.target.value; state.shown = PAGE; renderTable(); });
-    $("more").addEventListener("click", function () { state.shown += PAGE; renderTable(); });
+    $("q").addEventListener("input", function (e) { state.q = e.target.value; state.page = 1; renderTable(); });
+    $("category").addEventListener("change", function (e) { state.category = e.target.value; state.page = 1; renderTable(); });
+    $("language").addEventListener("change", function (e) { state.language = e.target.value; state.page = 1; renderTable(); });
+    $("pagesize").value = state.pageSize === Infinity ? "all" : String(state.pageSize);
+    $("pagesize").addEventListener("change", function (e) {
+      state.pageSize = e.target.value === "all" ? Infinity : Number(e.target.value); state.page = 1; savePageSize(state.pageSize); renderTable();
+    });
+    function goTo(page) {
+      state.page = page; renderTable();
+      var top = $("board").getBoundingClientRect().top;
+      if (top < 0) window.scrollTo({ top: window.scrollY + top - 8, behavior: "smooth" });
+    }
+    $("first").addEventListener("click", function () { goTo(1); });
+    $("prev").addEventListener("click", function () { goTo(state.page - 1); });
+    $("next").addEventListener("click", function () { goTo(state.page + 1); });
+    $("last").addEventListener("click", function () { goTo(Infinity); });
     $("sort").addEventListener("change", function (e) {
-      state.sort = e.target.value; state.dir = state.sort === "risk" || state.sort === "name" || state.sort === "category" ? "asc" : "desc"; state.shown = PAGE; renderTable();
+      state.sort = e.target.value; state.dir = state.sort === "risk" || state.sort === "name" || state.sort === "category" ? "asc" : "desc"; state.page = 1; renderTable();
     });
     document.querySelector("thead").addEventListener("click", function (e) {
       var th = e.target.closest("th"); if (!th) return;
@@ -298,7 +329,7 @@
       if (state.sort === key) state.dir = state.dir === "asc" ? "desc" : "asc";
       else { state.sort = key; state.dir = (key === "rank" || key === "name" || key === "category" || key === "risk") ? "asc" : "desc"; }
       $("sort").value = SCORE_KEYS.indexOf(key) !== -1 || key === "stars" ? key : "overall";
-      state.shown = PAGE; renderTable();
+      state.page = 1; renderTable();
     });
     $("rows").addEventListener("click", function (e) { var tr = e.target.closest("tr"); if (tr) openProject(tr.getAttribute("data-id")); });
     $("rows").addEventListener("keydown", function (e) {
@@ -340,7 +371,7 @@
       $("foot").innerHTML = "Last refreshed " + fmtDate(data.generated_at) + " · " + fmtInt(data.project_count) + " projects · collector v" + esc(data.version) +
         (data.failures && data.failures.length ? " · " + data.failures.length + " repositories could not be collected" : "") +
         ' · <a href="methodology.html">How scores are computed</a>' +
-        ' · OpenScores is run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a>';
+        ' · OpenScores is run by the <a href="https://openintelligence.foundation" target="_blank" rel="noopener">Open Intelligence Foundation</a>';
       renderTiles();
       renderTable();
       return fetch("data/history.json", { cache: "no-cache" }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; });

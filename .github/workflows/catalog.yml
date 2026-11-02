@@ -6,7 +6,7 @@ name: Weekly catalog sweep
 #
 # The two catalog files (about 28 MB) are not committed. They are handed to
 # the "White Score refresh" workflow (daily.yml) through the Actions cache; the
-# next refresh, within six hours, scores from the new catalog and deploys it
+# next refresh, within four hours, scores from the new catalog and deploys it
 # with the site, which then serves it at data/catalog.json. Only CATALOG.md,
 # the readable digest, is committed.
 

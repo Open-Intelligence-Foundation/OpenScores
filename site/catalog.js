@@ -120,7 +120,7 @@
       var hash = decodeURIComponent(location.hash.slice(1));
       if (hash && data.category_counts && data.category_counts[hash] != null) state.category = hash;
       $("foot").innerHTML = "Catalog generated " + new Date(data.generated_at).toLocaleString() + " · " + fmtInt(data.project_count) + " repositories · OpenScores v" + String(data.version).replace(/[<>&]/g, "") + " · full data: data/catalog.json" +
-        ' · run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a>';
+        ' · run by the <a href="https://openintelligence.foundation" target="_blank" rel="noopener">Open Intelligence Foundation</a>';
       render();
     }).catch(function (err) {
       $("banner").hidden = false;

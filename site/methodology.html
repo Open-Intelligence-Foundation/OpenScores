@@ -11,7 +11,7 @@
     <header class="topbar">
       <div class="brand">
         <div class="mark" aria-hidden="true">W</div>
-        <div><h1>OpenScores</h1><p>White Score leaderboard for open source AI projects on GitHub · run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a></p></div>
+        <div><h1>OpenScores</h1><p>White Score leaderboard for open source AI projects on GitHub · run by the <a href="https://openintelligence.foundation" target="_blank" rel="noopener">Open Intelligence Foundation</a></p></div>
       </div>
       <nav class="nav">
         <a href="./">Leaderboard</a>
@@ -39,7 +39,7 @@
       <h2>How projects are found</h2>
       <p>The <a href="catalog.html">catalog</a> is built by sweeping GitHub's repository search across 170 AI-related topics (from <code>llm</code> and <code>ai-agents</code> to <code>gaussian-splatting</code> and <code>speech-synthesis</code>). Topics with more than 1,000 matches are split into star bands to get past GitHub's per-query cap. A second pass searches repository names and descriptions for AI terms, which catches well-known projects that carry no topics, and a seed list is fetched directly. Only non-fork, non-archived repositories with at least 200 stars are kept.</p>
       <p>Each repository gets an <strong>AI signal</strong>: two points per specific AI topic it matched, one point at most for generic tags such as <code>ai</code> or <code>chat</code>, and up to two for AI terms in its description. Repositories scoring below two are shown as <em>AI-adjacent</em> and excluded from the leaderboard. Awesome-lists, courses and paper collections are detected from names, topics and descriptions and kept in their own category. Categories are assigned by scoring each repository's topics (specific topics weigh 2, generic ones 0.25) and description keywords (1, or 2 when the keyword appears in the opening words) against sixteen category rules; the highest total wins.</p>
-      <p>The leaderboard then tracks the top catalog projects by stars (300 by default) that have a recognised open source license and at least 500 stars, merged with a seed list. Metrics come from the GitHub GraphQL and REST APIs and use a rolling 90-day window (180 days for maintainer metrics, 12 months for releases).</p>
+      <p>The leaderboard then tracks the top catalog projects by stars (2,000 by default) that have a recognised open source license and at least 500 stars, merged with a seed list. Metrics come from the GitHub GraphQL and REST APIs and use a rolling 90-day window (180 days for maintainer metrics, 12 months for releases).</p>
 
       <h2>Normalisation helpers</h2>
       <pre class="formula">N_log(x, b)      = 100 × min(1, ln(1 + x) / ln(1 + b))      log-normalised count against a benchmark b
@@ -126,7 +126,7 @@ LOAD  = 100 × e^(−(issues + PRs opened in 90 days) / (60 × active maintainer
       </ul>
       <h2>Colour coding</h2>
       <p>Every score meter on the leaderboard is coloured by its band so that areas of concern stand out: <strong>strong</strong> (70–100) is green, <strong>adequate</strong> (50–69) is the neutral blue, <strong>weak</strong> (25–49) is amber and <strong>concern</strong> (0–24) is red. Risk is read the other way round, because a high risk score is the bad outcome: 0–24 is green (low risk), 25–49 blue (moderate), 50–74 amber (high) and 75–100 red (critical). The number itself always stays in the text colour; the colour is carried by the meter, and the band name appears when hovering a score.</p>
-      <p class="foot">All weights, benchmarks and windows are defined in <code>whitescore/config.py</code> and exported with each data file. OpenScores is run by the <a href="https://openintelligence.foundation" rel="noopener">Open Intelligence Foundation</a>.</p>
+      <p class="foot">All weights, benchmarks and windows are defined in <code>whitescore/config.py</code> and exported with each data file. OpenScores is run by the <a href="https://openintelligence.foundation" target="_blank" rel="noopener">Open Intelligence Foundation</a>.</p>
     </article>
   </div>
 </body>

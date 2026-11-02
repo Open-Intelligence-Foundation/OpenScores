@@ -17,20 +17,20 @@ static site with the leaderboard, per-project breakdowns and score history.
 ```
 GitHub API ──► whitescore (Python) ──► site/data/*.json ──► static site (GitHub Pages)
    weekly           catalog sweep       catalog.json          catalog.html
-   6-hourly         select from catalog leaderboard.json      index.html / app.js
+   4-hourly         select from catalog leaderboard.json      index.html / app.js
    cron             collect (incremental) history.json        methodology.html
                     score
 ```
 
 Two scheduled workflows share the work. The **weekly catalog sweep** finds
 every AI-related repository above the star threshold (about an hour of search
-requests). The **refresh**, four times a day, takes the top `MAX_REPOS` of
+requests). The **refresh**, six times a day, takes the top `MAX_REPOS` of
 them, fully collects the ones that are new or have not been fully collected
 for `FULL_REFRESH_DAYS` days (at most `MAX_FULL_COLLECT` per run), brings the
 rest up to date from a metrics cache with one light query per fifty
 repositories, rescores everything and redeploys the site. With the defaults
 every project is fully recollected once a day and its stars, forks, open
-issues, pull requests and last-commit date are never more than six hours old.
+issues, pull requests and last-commit date are never more than four hours old.
 
 | Piece | Where |
 |---|---|
@@ -170,17 +170,17 @@ Tests:
    to live topic discovery). It then runs on Sundays, rebuilds
    `site/data/catalog.json` and `catalog-web.json`, hands them to the refresh
    through the Actions cache, and commits only `CATALOG.md`. The catalog page
-   on the site picks up a new sweep at the next refresh, within six hours.
+   on the site picks up a new sweep at the next refresh, within four hours.
 5. Run the **White Score refresh** workflow once manually. It then runs every
-   six hours (00:17, 06:17, 12:17 and 18:17 UTC): it restores the previous
+   four hours (00:17, 04:17, 08:17, 12:17, 16:17 and 20:17 UTC): it restores the previous
    run's `data/metrics-cache.json`, `data/token-preferences.json` and
    `site/data/history.json` from the Actions cache, collects and scores,
    saves the new state to the cache, and deploys `site/` to Pages straight
    from the run, with copies of the two state files alongside the leaderboard.
    Nothing is committed except `site/data/history.json`, once a day. With the
-   default cap of 300 full collections per run, the first four runs build up
-   the 1,000 projects over a day; after that each run fully recollects the
-   ~250 whose cached metrics are a day old and refreshes the rest from cache.
+   default cap of 350 full collections per run, the first six runs build up
+   the 2,000 projects over a day; after that each run fully recollects the
+   ~335 whose cached metrics are a day old and refreshes the rest from cache.
 
 The cache is a convenience, not the source of truth. GitHub drops cache
 entries that have not been used for a week, so if the workflow is paused for
@@ -199,8 +199,8 @@ environment variables:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MAX_REPOS` | 1000 | Repositories tracked per run (top by stars, after seeds) |
-| `MAX_FULL_COLLECT` | 300 | Full collections per run; the rest are refreshed from cache (-1 = unlimited) |
+| `MAX_REPOS` | 2000 | Repositories tracked per run (top by stars, after seeds) |
+| `MAX_FULL_COLLECT` | 350 | Full collections per run; the rest are refreshed from cache (-1 = unlimited) |
 | `FULL_REFRESH_DAYS` | 1 | A repository is fully recollected once it is this many days old in the cache |
 | `GITHUB_TOKEN_FALLBACK` | unset | Second token, of the other kind, for repositories whose organization refuses the primary |
 | `LIGHT_BATCH` | 50 | Repositories per light-refresh GraphQL request |
@@ -221,20 +221,21 @@ A full collection costs about 10 requests and 7 GraphQL points per repository
 has 5,000 requests per hour for REST and 5,000 points per hour for GraphQL,
 counted separately, so one hour buys at most about 475 full collections even
 if every request landed in the same bucket. The light refresh is almost free:
-1,000 repositories cost 20 GraphQL requests.
+2,000 repositories cost 40 GraphQL requests.
 
-The schedule follows from that. Four runs a day with `FULL_REFRESH_DAYS=1`
-means each run fully recollects about 250 repositories (~2,600 requests and
-~1,850 points, roughly half of one hour's budget, leaving room for retries)
-and light-refreshes the other 750, in 15 to 20 minutes with six workers.
-Running more often would not make the full metrics fresher, since the daily
-budget only covers each repository once; it would only shorten the six-hour
-lag on the light fields at the cost of another Pages deploy and more
-Actions minutes per run. Four runs are about 80 Actions minutes a day
-(2,400 a month, plus about 240 for the weekly sweep). Public repositories get
+The schedule follows from that. Six runs a day with `FULL_REFRESH_DAYS=1`
+means each run fully recollects about 335 repositories (~3,500 requests and
+~2,400 points, about two thirds of one hour's budget, leaving room for
+retries) and light-refreshes the other ~1,665, in 20 to 30 minutes with six
+workers. Running more often would not make the full metrics fresher, since
+the daily budget only covers each repository once; it would only shorten the
+four-hour lag on the light fields at the cost of another Pages deploy and
+more Actions minutes per run. Six runs are about 150 Actions minutes a day
+(4,500 a month, plus about 240 for the weekly sweep). Public repositories get
 unlimited Actions minutes; a private repository on the Pro or Team plan has
-3,000 a month, on the Free plan 2,000, so on the Free plan drop to three runs
-a day (`cron: "17 */8 * * *"` with `MAX_FULL_COLLECT=400`).
+3,000 a month, on the Free plan 2,000, so a private repository should drop
+to three runs a day (`cron: "17 */8 * * *"` with `FULL_REFRESH_DAYS=2`),
+which fully recollects each project every two days instead of daily.
 
 Raise `MAX_FULL_COLLECT` only with a bigger budget (a GitHub App token), never
 by pooling several personal tokens, which GitHub's terms forbid. The fallback

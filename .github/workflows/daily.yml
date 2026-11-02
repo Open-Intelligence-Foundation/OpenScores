@@ -1,10 +1,10 @@
 name: White Score refresh
 
-# Four runs a day. Each fully recollects the ~250 repositories whose cached
-# metrics are a day old (about 2,600 requests, inside one hour of a personal
-# token's 5,000/hour budget) and refreshes the other ~750 with 15 light GraphQL
-# requests, so every project is fully recollected daily and its stars, forks,
-# issues, pull requests and last commit are at most six hours old.
+# Six runs a day. Each fully recollects the ~335 repositories whose cached
+# metrics are a day old (about 3,500 requests, inside one hour of a personal
+# token's 5,000/hour budget) and refreshes the other ~1,665 with 34 light
+# GraphQL requests, so every project is fully recollected daily and its stars,
+# forks, issues, pull requests and last commit are at most four hours old.
 #
 # A run commits nothing except the score history, once a day. The collector's
 # state (metrics cache, token preferences, history) travels from run to run in
@@ -14,15 +14,15 @@ name: White Score refresh
 # tree, so main stays code-only and the repository does not grow with the data.
 on:
   schedule:
-    - cron: "17 */6 * * *"      # 00:17, 06:17, 12:17, 18:17 UTC
+    - cron: "17 */4 * * *"      # 00:17, 04:17, 08:17, 12:17, 16:17, 20:17 UTC
   workflow_dispatch:
     inputs:
       max_repos:
         description: "Maximum repositories to track"
-        default: "1000"
+        default: "2000"
       max_full:
         description: "Full (expensive) collections this run; the rest refresh from cache (-1 = all due)"
-        default: "300"
+        default: "350"
 
 permissions:
   contents: write               # the daily score-history commit
@@ -129,8 +129,8 @@ jobs:
           # organization refuses classic tokens. Repositories that needed it are
           # remembered in data/token-preferences.json.
           GITHUB_TOKEN_FALLBACK: ${{ secrets.WHITESCORE_GITHUB_TOKEN_FALLBACK }}
-          MAX_REPOS: ${{ github.event.inputs.max_repos || '1000' }}
-          MAX_FULL_COLLECT: ${{ github.event.inputs.max_full || '300' }}
+          MAX_REPOS: ${{ github.event.inputs.max_repos || '2000' }}
+          MAX_FULL_COLLECT: ${{ github.event.inputs.max_full || '350' }}
         run: python -m whitescore
 
       - name: Save the collector's state for the next run

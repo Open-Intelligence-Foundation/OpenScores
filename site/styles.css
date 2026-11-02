@@ -107,7 +107,7 @@ col.c-rank { width: 44px; }
 col.c-main { width: 190px; }
 col.c-cat { width: 150px; }
 col.c-stars { width: 86px; }
-col.c-sub { width: 72px; }
+col.c-sub { width: 86px; }      /* fits "Sustainability" at 11px with 6px padding */
 thead th {
   position: sticky; top: 0; background: var(--surface); z-index: 1; text-align: left; font-size: 12px;
   color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
@@ -150,8 +150,8 @@ thead th.main { color: var(--ink-2); white-space: normal; overflow: hidden; }
 .score.sub { display: block; min-width: 0; width: 58px; }
 .score.sub .v { display: block; text-align: left; font-size: 13px; font-weight: 500; color: var(--ink-2); line-height: 1.2; }
 .score.sub .meter { height: 3px; width: 48px; margin-top: 3px; }
-thead th.sub { text-transform: none; letter-spacing: 0; font-size: 11px; font-weight: 500; padding-left: 10px; white-space: normal; }
-td.sub { padding-left: 10px; padding-right: 6px; }
+thead th.sub { text-transform: none; letter-spacing: 0; font-size: 11px; font-weight: 500; padding-left: 6px; padding-right: 6px; white-space: normal; }
+td.sub { padding-left: 6px; padding-right: 6px; }
 .delta { font-size: 11px; font-variant-numeric: tabular-nums; margin-left: 4px; white-space: nowrap; }
 .delta.up { color: var(--good); }
 .delta.down { color: var(--bad); }
@@ -259,6 +259,10 @@ details.section > summary .sum { color: var(--ink-2); font-weight: 500; font-var
 table.catalog { min-width: 900px; }
 table.catalog thead th { cursor: default; }
 .more-wrap { padding: 12px; text-align: center; }
+.pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 12px; border-top: 1px solid var(--grid); }
+.pager .page-info { color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; min-width: 180px; text-align: center; }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.icon-btn:disabled:hover { color: var(--ink-2); }
 @media (max-width: 900px) {
   .catalog-layout { grid-template-columns: 1fr; }
   .cats { position: static; flex-direction: row; flex-wrap: wrap; }
