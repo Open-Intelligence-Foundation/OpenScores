@@ -103,10 +103,10 @@ table { width: 100%; border-collapse: collapse; table-layout: fixed; }
    board never grows wider than the page. Columns that narrow screens hide
    are all trailing ones, which keeps the fixed layout's cell-to-column
    mapping intact. */
-col.c-rank { width: 44px; }
+col.c-rank { width: 68px; }      /* four-digit ranks (37px at 15px) plus 10px padding each side */
 col.c-main { width: 190px; }
 col.c-cat { width: 150px; }
-col.c-stars { width: 86px; }
+col.c-stars { width: 96px; }     /* "1.2M" plus its 7-day delta on a second line */
 col.c-sub { width: 86px; }      /* fits "Sustainability" at 11px with 6px padding */
 thead th {
   position: sticky; top: 0; background: var(--surface); z-index: 1; text-align: left; font-size: 12px;
@@ -121,8 +121,11 @@ tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--surface-2); }
 tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 tbody tr:last-child td { border-bottom: none; }
-td.rank { color: var(--muted); font-variant-numeric: tabular-nums; width: 44px; text-align: right; }
+td.rank { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* the star delta sits under the count, like the overall score's delta, so the
+   column never has to hold "152k ▲ 1.2k" on one line */
+td.num .delta { display: block; margin-left: 0; }
 .proj .name { font-weight: 600; }
 .proj .owner { color: var(--muted); font-weight: 400; }
 .proj .desc { color: var(--ink-2); font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -233,14 +236,14 @@ details.section > summary .sum { color: var(--ink-2); font-weight: 500; font-var
 }
 @media (max-width: 720px) {
   .brand p { display: none; }
+  col.c-rank { width: 58px; }
   col.c-main { width: 108px; }
-  col.c-stars { width: 62px; }
+  col.c-stars { width: 68px; }
   tbody td, thead th { padding-left: 8px; padding-right: 8px; }
   .score.overall { grid-template-columns: 44px 1fr; min-width: 0; }
   .score.overall .v { font-size: 19px; }
   .score.overall .d { display: none; }
   .proj .chip { display: none; }
-  td.num .delta { display: block; margin-left: 0; }
   .row { grid-template-columns: 1fr 44px 52px; }
   .row .meter { grid-column: 1 / -1; }
   .drawer { padding: 14px 16px 40px; }
