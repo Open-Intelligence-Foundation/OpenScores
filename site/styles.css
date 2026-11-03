@@ -260,7 +260,16 @@ details.section > summary .sum { color: var(--ink-2); font-weight: 500; font-var
 .cat-btn.active b { color: var(--ink-2); }
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
 table.catalog { min-width: 900px; }
-table.catalog thead th { cursor: default; }
+/* catalog columns: everything but the project column has a fixed width wide
+   enough for its longest value ("Jupyter Notebook", "NOASSERTION", "1.9y ago"),
+   and the project column takes the rest */
+table.catalog col.k-rank { width: 56px; }
+table.catalog col.k-cat { width: 150px; }
+table.catalog col.k-num { width: 76px; }
+table.catalog col.k-lang { width: 132px; }
+table.catalog col.k-lic { width: 116px; }
+table.catalog col.k-date { width: 88px; }
+table.catalog thead th:not([data-sort]) { cursor: default; }
 .more-wrap { padding: 12px; text-align: center; }
 .pager { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; padding: 12px; border-top: 1px solid var(--grid); }
 .pager .page-info { color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; min-width: 180px; text-align: center; }

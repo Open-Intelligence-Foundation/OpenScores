@@ -4,11 +4,24 @@
   var $ = function (id) { return document.getElementById(id); };
   var PAGE = 200;
   var all = [], catalog = null;
-  var state = { q: "", category: "", language: "", sort: "stars", lists: false, adjacent: false, shown: PAGE };
+  // Sort keys: a getter per column plus the direction a fresh click starts
+  // with (numbers and dates descending, text ascending). Ties in text columns
+  // fall back to stars so the order inside a category stays meaningful.
+  var SORTS = {
+    stars: { get: function (p) { return p.s || 0; }, dir: "desc" },
+    forks: { get: function (p) { return p.f || 0; }, dir: "desc" },
+    pushed: { get: function (p) { return p.p || ""; }, dir: "desc" },
+    created: { get: function (p) { return p.cr || ""; }, dir: "desc" },
+    name: { get: function (p) { return p.n.toLowerCase(); }, dir: "asc", text: true },
+    category: { get: function (p) { return (p.c || "").toLowerCase(); }, dir: "asc", text: true },
+    language: { get: function (p) { return (p.l || "").toLowerCase(); }, dir: "asc", text: true },
+    license: { get: function (p) { return (p.lic || "").toLowerCase(); }, dir: "asc", text: true }
+  };
+  var state = { q: "", category: "", language: "", sort: "stars", dir: "desc", lists: false, adjacent: false, shown: PAGE };
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function fmtInt(n) { return n == null ? "—" : Number(n).toLocaleString("en-US"); }
-  function fmtCompact(n) { n = Number(n || 0); if (n >= 1e6) return (n / 1e6).toFixed(1) + "M"; if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + "k"; return String(n); }
+  function fmtCompact(n) { n = Number(n || 0); if (n >= 1e6) return (n / 1e6).toFixed(n >= 9.95e6 ? 0 : 1) + "M"; if (n >= 1e3) return (n / 1e3).toFixed(n >= 9.95e3 ? 0 : 1) + "k"; return String(n); }
   function ago(iso) {
     if (!iso) return "—";
     var days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -24,13 +37,44 @@
       if (state.language && p.l !== state.language) return false;
       if (!q) return true;
       return (p.n + " " + (p.d || "") + " " + (p.t || []).join(" ")).toLowerCase().indexOf(q) !== -1;
-    }).sort(function (a, b) {
-      if (state.sort === "name") return a.n.toLowerCase().localeCompare(b.n.toLowerCase());
-      if (state.sort === "pushed") return (b.p || "").localeCompare(a.p || "");
-      if (state.sort === "created") return (b.cr || "").localeCompare(a.cr || "");
-      if (state.sort === "forks") return (b.f || 0) - (a.f || 0);
-      return (b.s || 0) - (a.s || 0);
-    });
+    }).sort(compare);
+  }
+
+  function compare(a, b) {
+    var s = SORTS[state.sort] || SORTS.stars;
+    var va = s.get(a), vb = s.get(b), out;
+    if (s.text) {
+      // empty values ("no language", "no license") always sort last
+      if (!va && vb) return 1;
+      if (va && !vb) return -1;
+      out = va.localeCompare(vb);
+    } else {
+      out = va < vb ? -1 : va > vb ? 1 : 0;
+    }
+    if (state.dir === "desc") out = -out;
+    if (out === 0 && state.sort !== "stars") out = (b.s || 0) - (a.s || 0);
+    return out;
+  }
+
+  function setSort(key, dir) {
+    if (!SORTS[key]) return;
+    state.sort = key;
+    state.dir = dir || SORTS[key].dir;
+    var sel = $("sort");
+    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === key) sel.value = key;
+    state.shown = PAGE;
+    renderRows();
+  }
+
+  function renderHeaders() {
+    var ths = document.querySelectorAll("thead th[data-sort]");
+    for (var i = 0; i < ths.length; i++) {
+      var th = ths[i];
+      var active = th.getAttribute("data-sort") === state.sort;
+      th.setAttribute("aria-sort", active ? (state.dir === "asc" ? "ascending" : "descending") : "none");
+      var label = th.textContent.replace(/[▲▼]\s*$/, "").trim();
+      th.innerHTML = esc(label) + (active ? ' <span class="arrow">' + (state.dir === "asc" ? "▲" : "▼") + "</span>" : "");
+    }
   }
 
   function include(p) {
@@ -70,6 +114,7 @@
         '<td class="cat">' + esc(p.lic || "none") + "</td>" +
         '<td class="cat" title="' + esc(p.p) + '">' + ago(p.p) + "</td></tr>";
     }).join("");
+    renderHeaders();
     $("more").hidden = list.length <= state.shown;
     $("more").textContent = "Show more (" + fmtInt(Math.min(PAGE, list.length - state.shown)) + " of " + fmtInt(list.length - state.shown) + " remaining)";
   }
@@ -79,7 +124,13 @@
   function wire() {
     $("q").addEventListener("input", function (e) { state.q = e.target.value; state.shown = PAGE; renderRows(); });
     $("language").addEventListener("change", function (e) { state.language = e.target.value; state.shown = PAGE; renderRows(); });
-    $("sort").addEventListener("change", function (e) { state.sort = e.target.value; renderRows(); });
+    $("sort").addEventListener("change", function (e) { setSort(e.target.value); });
+    document.querySelector("thead").addEventListener("click", function (e) {
+      var th = e.target.closest("th[data-sort]"); if (!th) return;
+      var key = th.getAttribute("data-sort");
+      // a second click on the active column flips the direction
+      setSort(key, state.sort === key ? (state.dir === "asc" ? "desc" : "asc") : null);
+    });
     $("lists").addEventListener("change", function (e) { state.lists = e.target.checked; state.shown = PAGE; render(); });
     $("adjacent").addEventListener("change", function (e) { state.adjacent = e.target.checked; state.shown = PAGE; render(); });
     $("cats").addEventListener("click", function (e) {

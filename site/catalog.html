@@ -38,6 +38,9 @@
             <option value="created">Sort: Newest</option>
             <option value="forks">Sort: Forks</option>
             <option value="name">Sort: Name</option>
+            <option value="category">Sort: Category</option>
+            <option value="language">Sort: Language</option>
+            <option value="license">Sort: License</option>
           </select>
           <label class="check"><input type="checkbox" id="adjacent"> AI-adjacent</label>
           <label class="check"><input type="checkbox" id="lists"> curated lists</label>
@@ -45,7 +48,19 @@
         </div>
         <div class="table-wrap">
           <table id="board" class="catalog">
-            <thead><tr><th class="num">#</th><th>Project</th><th>Category</th><th class="num">Stars</th><th class="num">Forks</th><th>Language</th><th>License</th><th>Updated</th></tr></thead>
+            <colgroup>
+              <col class="k-rank"><col class="k-proj"><col class="k-cat"><col class="k-num" span="2"><col class="k-lang"><col class="k-lic"><col class="k-date">
+            </colgroup>
+            <thead><tr>
+              <th class="num" title="Position in the current sort">#</th>
+              <th data-sort="name" title="Sort by name">Project</th>
+              <th data-sort="category" title="Sort by category">Category</th>
+              <th class="num" data-sort="stars" title="Sort by stars">Stars</th>
+              <th class="num" data-sort="forks" title="Sort by forks">Forks</th>
+              <th data-sort="language" title="Sort by language">Language</th>
+              <th data-sort="license" title="Sort by license">License</th>
+              <th data-sort="pushed" title="Sort by last push">Updated</th>
+            </tr></thead>
             <tbody id="rows"></tbody>
           </table>
           <div id="empty" class="empty" hidden>No projects match.</div>
