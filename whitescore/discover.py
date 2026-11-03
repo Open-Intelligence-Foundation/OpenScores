@@ -4,7 +4,9 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Dict, List
+import json
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
 
 from . import config
 from .github import GitHubClient
@@ -34,8 +36,7 @@ def discover(client: GitHubClient, topics: List[str] = None, pages_per_topic: in
                 if not node or node.get("isArchived") or node.get("isFork"):
                     continue
                 license_info = node.get("licenseInfo") or {}
-                spdx = license_info.get("spdxId")
-                if config.REQUIRE_RECOGNIZED_LICENSE and (not spdx or spdx == "NOASSERTION"):
+                if not license_allowed(license_info.get("spdxId"), node["nameWithOwner"]):
                     continue
                 if node.get("stargazerCount", 0) < min_stars:
                     continue
@@ -55,13 +56,15 @@ def discover(client: GitHubClient, topics: List[str] = None, pages_per_topic: in
     return found
 
 
-def select_repos(found: Dict[str, dict], seeds: List[str] = None, max_repos: int = None) -> List[str]:
-    """Rank candidates by stars, always keeping seed repos, capped at max_repos."""
+def select_repos(found: Dict[str, dict], seeds: List[str] = None, max_repos: int = None,
+                 exclude: Iterable[str] = ()) -> List[str]:
+    """Rank candidates by stars, always keeping seed repos, capped at max_repos.
+    Names in ``exclude`` (the manual exclusion list) are never chosen, seeds included."""
     seeds = config.SEED_REPOS if seeds is None else seeds
     max_repos = max_repos or config.MAX_REPOS
     ranked = sorted(found.items(), key=lambda kv: (-kv[1]["stars"], kv[0]))
     chosen: List[str] = []
-    seen = set()
+    seen = {e.strip().lower() for e in exclude if e and e.strip()}
     for seed in seeds:
         key = seed.strip()
         if key and key.lower() not in seen:
@@ -146,12 +149,73 @@ def _category_from_name(name: str) -> str:
     return config.DEFAULT_CATEGORY
 
 
+# Words in a description that mark a project as AI-related. The weak ones also
+# occur in plain software ("no agents to install", "embedding web technologies",
+# "command prompt") and count half, so a description needs two of them.
 AI_WORDS = (" ai ", " ai-", "ai-powered", " ai.", "(ai)", "llm", "language model", "machine learning", "deep learning",
-            "neural", "gpt", "chatgpt", "openai", "claude", "gemini", "llama", "ai agent", "agents", "agentic",
-            "transformer", "diffusion", "embedding", "rag ", "retrieval-augmented", "inference", "fine-tun", "finetun",
-            "computer vision", "speech", "whisper", "generative", "copilot", "chatbot", "prompt", " ml ", "nlp",
-            "ocr", "object detection", "segmentation", "reinforcement learning", "text-to-", "mcp ", "mcp server",
+            "gpt", "chatgpt", "openai", "claude", "gemini", "llama", "ai agent", "agentic",
+            "transformer", "diffusion", "rag ", "retrieval-augmented", "fine-tun", "finetun",
+            "computer vision", "whisper", "chatbot", " ml ", "nlp",
+            "object detection", "reinforcement learning", "mcp ", "mcp server",
             "stable diffusion", "image generation", "voice clon", "artificial intelligence")
+WEAK_AI_WORDS = ("agents", "embedding", "inference", "prompt", "speech", "generative", "copilot",
+                 "neural", "ocr", "segmentation", "text-to-")
+
+
+ROOT = Path(__file__).resolve().parent.parent
+EXCLUDE_FILE = ROOT / "excluded_repos.txt"              # never tracked on the leaderboard
+CATEGORY_OVERRIDES_FILE = ROOT / "category_overrides.json"
+
+
+def load_exclusions(path: Path = None) -> List[str]:
+    """owner/name per line; '#' starts a comment, inline comments allowed."""
+    path = path or EXCLUDE_FILE
+    if not path.exists():
+        return []
+    names = []
+    for line in path.read_text().splitlines():
+        name = line.split("#", 1)[0].strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def load_category_overrides(path: Path = None) -> Dict[str, str]:
+    """{owner/name (lower-cased): category}; unknown category names are dropped with a warning."""
+    path = path or CATEGORY_OVERRIDES_FILE
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except ValueError as exc:
+        log.warning("%s is not valid JSON (%s); ignoring category overrides", path, exc)
+        return {}
+    known = {name for name, _ in config.CATEGORY_RULES} | {config.DEFAULT_CATEGORY, config.CURATED_LIST_CATEGORY}
+    out = {}
+    for name, category in (data.get("overrides") or {}).items():
+        if category in known:
+            out[name.strip().lower()] = category
+        else:
+            log.warning("category override for %s names an unknown category %r; ignored", name, category)
+    return out
+
+
+def license_allowed(spdx: Optional[str], full_name: str = "") -> bool:
+    """Whether a repository's licence satisfies the policy (see config)."""
+    if not config.REQUIRE_RECOGNIZED_LICENSE:
+        return True
+    return effective_license(spdx, full_name) in config.OSI_APPROVED_LICENSES
+
+
+def effective_license(spdx: Optional[str], full_name: str = "") -> Optional[str]:
+    """The licence to credit a repository with: the hand-checked override when
+    GitHub cannot detect one, else what GitHub reported."""
+    override = config.LICENSE_OVERRIDES.get(full_name) if full_name else None
+    if override and (not spdx or spdx == "NOASSERTION"):
+        return override
+    if override and spdx not in config.OSI_APPROVED_LICENSES:
+        return override          # GitHub picked a docs/data licence over the code licence
+    return spdx
 
 
 def ai_signal(topics: List[str], hits: List[str], description: str) -> int:
@@ -162,5 +226,7 @@ def ai_signal(topics: List[str], hits: List[str], description: str) -> int:
     generic = min(1, sum(1 for h in hits if h in config.GENERIC_TOPICS))
     topic_bonus = sum(1 for t in topics if t.lower() in config.AI_TOPICS and t.lower() not in config.GENERIC_TOPICS and t not in hits)
     desc = " " + (description or "").lower() + " "
-    words = min(2, sum(1 for w in AI_WORDS if w in desc))
+    strong_words = sum(1 for w in AI_WORDS if w in desc)
+    weak_words = sum(1 for w in WEAK_AI_WORDS if w in desc)
+    words = min(2, int(strong_words + weak_words // 2))
     return 2 * strong + generic + min(2, topic_bonus) + words

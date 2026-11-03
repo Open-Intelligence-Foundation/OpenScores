@@ -15,6 +15,10 @@ name: White Score refresh
 on:
   schedule:
     - cron: "17 */4 * * *"      # 00:17, 04:17, 08:17, 12:17, 16:17, 20:17 UTC
+    # Backstop: GitHub drops scheduled runs now and then. This slot runs only
+    # when the live site has not been refreshed in the last 150 minutes (see
+    # the gate job), so a skipped slot costs an hour of staleness, not four.
+    - cron: "47 1-23/4 * * *"   # 01:47, 05:47, 09:47, 13:47, 17:47, 21:47 UTC
   workflow_dispatch:
     inputs:
       max_repos:
@@ -34,7 +38,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The backstop schedule is skipped when a refresh ran recently; every other
+  # trigger always runs.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.check.outputs.run }}
+    steps:
+      - id: check
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          if [ "$SCHEDULE" != "47 1-23/4 * * *" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          generated=$(curl -fsSL --max-time 20 https://openscores.io/data/leaderboard.json \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("generated_at",""))' 2>/dev/null || true)
+          if [ -z "$generated" ]; then
+            echo "Could not read the live board; running."; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          age=$(( $(date -u +%s) - $(date -u -d "$generated" +%s) ))
+          if [ "$age" -lt 9000 ]; then
+            echo "Live board is $((age / 60)) minutes old; the scheduled run happened. Skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Live board is $((age / 60)) minutes old; the scheduled run was dropped. Running."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
   collect:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -117,6 +151,14 @@ jobs:
           done
           # Back to the committed copy, if there is one (a fresh fork has none yet).
           [ -s site/data/history.json ] || git checkout -- site/data/history.json 2>/dev/null || true
+
+      # Categories, AI signal and the licence flag follow the current code, not
+      # the code of the last weekly sweep (no network).
+      - name: Recategorize the catalog with the current rules
+        run: |
+          if [ -s site/data/catalog.json ]; then
+            python -m whitescore.catalog --recategorize
+          fi
 
       - name: Collect and score
         env:

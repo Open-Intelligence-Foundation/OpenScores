@@ -286,6 +286,10 @@ details.section > summary .sum { color: var(--ink-2); font-weight: 500; font-var
   .card.overall { grid-template-columns: 1fr; }
 }
 
+/* methodology: selection term lists */
+.terms .termlist { line-height: 2; }
+.terms details.section { margin: 8px 0; }
+
 /* catalog page */
 .catalog-layout { display: grid; grid-template-columns: 240px 1fr; gap: 14px; align-items: start; }
 .catalog-layout > * { min-width: 0; }   /* the wide table scrolls inside its wrap instead of stretching the page */

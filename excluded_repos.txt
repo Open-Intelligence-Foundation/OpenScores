@@ -1,0 +1,6 @@
+# Repositories never tracked on the leaderboard, one owner/name per line.
+# The catalog keeps them (it records everything the sweep finds); this list
+# only stops them being scored. Use it for projects the keyword search
+# mis-identifies as AI. Lines starting with # are ignored.
+ansible/ansible      # IT automation; matched "no agents to install"
+servo/servo          # web engine; matched "embedding web technologies"

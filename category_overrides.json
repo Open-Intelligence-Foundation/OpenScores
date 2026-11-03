@@ -1,0 +1,5 @@
+{
+  "_comment": "owner/name -> category. Applied after the automatic rules, on the leaderboard and in the catalog. Category names must match whitescore/config.py CATEGORY_RULES.",
+  "overrides": {
+  }
+}

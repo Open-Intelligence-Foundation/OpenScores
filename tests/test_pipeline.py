@@ -155,6 +155,44 @@ def test_a_failed_collection_keeps_the_cached_project_on_the_board(tmp_path, mon
     assert kept["metrics"]["from_cache"] is True
 
 
+# ---------------------------------------------------------------- selection policy on the board
+def test_licence_policy_exclusions_and_overrides_apply_to_the_board(tmp_path, monkeypatch):
+    def metrics_with_licence(name):
+        m = metrics_for(name)
+        m["license"] = {"a/one": "MIT", "a/seed": "NOASSERTION", "a/fixed": "NOASSERTION"}.get(name, "MIT")
+        return m
+
+    monkeypatch.setattr(pipeline, "GitHubClient", FakeGitHubClient)
+    monkeypatch.setattr(pipeline, "collect_repo", lambda client, name, now: metrics_with_licence(name))
+    monkeypatch.setattr(pipeline, "fetch_light", lambda client, names: {})
+    monkeypatch.setattr(pipeline, "catalog_candidates",
+                        lambda min_stars: {"a/one": {"stars": 300, "topics": []}, "a/excluded": {"stars": 250, "topics": []}})
+    monkeypatch.setattr(pipeline, "load_seed_file", lambda: [])
+    monkeypatch.setattr(pipeline, "load_exclusions", lambda: ["a/excluded"])
+    monkeypatch.setattr(pipeline, "load_category_overrides", lambda: {"a/one": "Computer Vision"})
+    monkeypatch.setattr(config, "SEED_REPOS", ["a/seed", "a/fixed"])
+    monkeypatch.setattr(config, "LICENSE_OVERRIDES", {"a/fixed": "BSD-3-Clause"})
+    monkeypatch.setattr(config, "REQUIRE_RECOGNIZED_LICENSE", True)
+    monkeypatch.setattr(pipeline, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(pipeline, "LEADERBOARD_PATH", tmp_path / "leaderboard.json")
+    monkeypatch.setattr(pipeline, "HISTORY_PATH", tmp_path / "history.json")
+    monkeypatch.setattr(pipeline, "CACHE_PATH", tmp_path / "cache" / "metrics-cache.json")
+    monkeypatch.setattr(pipeline, "TOKEN_PREFS_PATH", tmp_path / "cache" / "token-preferences.json")
+    monkeypatch.delenv("GITHUB_TOKEN_FALLBACK", raising=False)
+
+    board = pipeline.run(max_repos=10, max_full=-1)
+    names = {p["full_name"]: p for p in board["projects"]}
+    assert "a/excluded" not in names                       # manual exclusion
+    assert "a/seed" not in names                           # a seed with an unrecognised licence is dropped
+    assert names["a/fixed"]["license"] == "BSD-3-Clause"   # hand-checked override is credited
+    assert names["a/fixed"]["metrics"]["has_license"] is True
+    assert names["a/one"]["category"] == "Computer Vision"
+    assert board["license"] == "CC-BY-4.0" and board["license_url"]
+    terms = json.loads((tmp_path / "terms.json").read_text())
+    assert terms["excluded"] == ["a/excluded"] and terms["category_overrides"] == {"a/one": "Computer Vision"}
+    assert "MIT" in terms["osi_licenses"] and terms["license_overrides"] == {"a/fixed": "BSD-3-Clause"}
+
+
 # ---------------------------------------------------------------- star growth and history hygiene
 def _series(day_stars):
     return [{"d": d, "o": 50.0, "stars": s} for d, s in day_stars]

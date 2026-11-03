@@ -211,7 +211,7 @@ environment variables:
 | `LIGHT_BATCH` | 50 | Repositories per light-refresh GraphQL request |
 | `MIN_STARS` | 500 | Discovery threshold |
 | `PAGES_PER_TOPIC` | 2 | Search pages (100 results each) per topic |
-| `REQUIRE_RECOGNIZED_LICENSE` | true | Drop repos whose license GitHub cannot identify |
+| `REQUIRE_RECOGNIZED_LICENSE` | true | Require an OSI-approved licence (`OSI_APPROVED_LICENSES` in `config.py`; `LICENSE_OVERRIDES` covers repositories whose licence file GitHub cannot read). Seeds obey it too. |
 | `MAX_COMMIT_PAGES` | 5 | Up to 500 recent commits sampled per repo |
 | `WORKERS` | 6 | Concurrent repositories collected |
 | `HISTORY_MAX_POINTS` | 120 | Daily score points kept per project |
@@ -246,7 +246,27 @@ Raise `MAX_FULL_COLLECT` only with a bigger budget (a GitHub App token), never
 by pooling several personal tokens, which GitHub's terms forbid. The fallback
 token is not pooling: a repository is read with one token per run.
 
+## Curating the board
+
+Three small files in the repository root adjust the automatic selection, and
+all three are published with each run in `site/data/terms.json` and shown on
+the methodology page:
+
+* `seed_repos.txt` – repositories always tracked (they still need an accepted licence).
+* `excluded_repos.txt` – repositories never scored, for projects the keyword
+  search mis-identifies as AI (the catalog still lists them).
+* `category_overrides.json` – `owner/name` to category, applied after the
+  automatic rules on both the leaderboard and the catalog.
+
+Anyone can dispute a score, category or listing through the repository's
+"Dispute a score" issue template; every project panel on the leaderboard links
+to it with the repository pre-filled.
+
 ## Data files
+
+The published data files are licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/);
+each file carries `license`, `license_url` and `attribution` fields. Credit
+"OpenScores by the Open Intelligence Foundation" with a link to openscores.io.
 
 The collector reads and writes plain JSON files on disk, the same ones
 whether it runs locally or in Actions:

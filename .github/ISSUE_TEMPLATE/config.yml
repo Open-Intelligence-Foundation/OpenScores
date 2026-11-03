@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How scores are computed
+    url: https://openscores.io/methodology.html
+    about: The formulas, weights, selection rules and known limitations behind every White Score.

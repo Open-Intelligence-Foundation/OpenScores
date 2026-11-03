@@ -1,0 +1,44 @@
+name: Dispute a score, category or listing
+description: Tell us when a project's White Score, its category, or its presence on the leaderboard looks wrong.
+title: "Dispute: owner/name"
+labels: ["dispute"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for checking the numbers. Scores are computed from public GitHub data by the rules on the [methodology page](https://openscores.io/methodology.html); every input is listed under "Raw metrics" in the project's panel on the leaderboard. Disputes are reviewed by a maintainer, and fixes that change the rules are recorded in the methodology changelog.
+  - type: input
+    id: repository
+    attributes:
+      label: Repository
+      description: owner/name as shown on the leaderboard
+      placeholder: owner/name
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is wrong?
+      options:
+        - A score or one of its inputs
+        - The category
+        - The project should not be listed
+        - The project is missing
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Which number or label, what you expected, and why. Links to the evidence help.
+    validations:
+      required: true
+  - type: checkboxes
+    id: role
+    attributes:
+      label: Your relation to the project
+      options:
+        - label: I maintain this project
+        - label: I contribute to this project
+        - label: I am a user or observer

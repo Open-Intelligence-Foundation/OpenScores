@@ -60,7 +60,7 @@ def test_strong_project_scores_high_everywhere():
 def test_empty_metrics_are_safe_and_low():
     s = scoring.score_all({})
     assert 0 <= s["maturity"] <= 100
-    assert s["popularity"] == 0
+    assert s["popularity"] == 10      # unknown star growth is neutral (50 x 0.20); everything else is 0
     assert s["risk"] >= 60            # unknown everything is risky
     assert s["sustainability"] <= 35     # unknown retention is neutral (50), the rest is 0 or default
 

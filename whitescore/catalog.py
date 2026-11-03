@@ -21,7 +21,8 @@ from typing import Dict, List, Optional
 import requests
 
 from . import __version__, config
-from .discover import ai_signal, categorize, is_curated_list
+from .discover import (ai_signal, categorize, effective_license, is_curated_list, license_allowed,
+                       load_category_overrides)
 
 log = logging.getLogger("whitescore.catalog")
 
@@ -223,7 +224,8 @@ def finalize(found: Dict[str, dict], min_stars: int) -> List[dict]:
         e["hits"] = hits
         e["is_list"] = is_curated_list(e["full_name"], e["description"], topics)
         e["category"] = categorize(topics, e["description"], e["full_name"])
-        e["license_recognized"] = bool(e["license"]) and e["license"] != "NOASSERTION"
+        e["license"] = effective_license(e["license"], e["full_name"])
+        e["license_recognized"] = license_allowed(e["license"], e["full_name"])   # meets the licence policy
         e["signal"] = ai_signal(topics, hits, e["description"])
         if "seed" in hits:
             e["signal"] = max(e["signal"], 4)
@@ -240,6 +242,10 @@ def write_catalog(found: Dict[str, dict], topics_done: List[str], partial: bool,
                   requests_made: int, out: Path) -> dict:
     """Write the full catalog (for the collector) and a slim web copy (for the site)."""
     projects = finalize(found, min_stars)
+    overrides = load_category_overrides()
+    for p in projects:
+        if p["full_name"].lower() in overrides:
+            p["category"] = overrides[p["full_name"].lower()]
     counts: Dict[str, int] = {}
     for p in projects:
         counts[p["category"]] = counts.get(p["category"], 0) + 1
@@ -251,6 +257,7 @@ def write_catalog(found: Dict[str, dict], topics_done: List[str], partial: bool,
         "requests": requests_made,
         "project_count": len(projects),
         "category_counts": dict(sorted(counts.items(), key=lambda kv: -kv[1])),
+        "license": config.DATA_LICENSE, "license_url": config.DATA_LICENSE_URL, "attribution": config.DATA_ATTRIBUTION,
     }
     catalog = dict(meta, topics_searched=topics_done, projects=projects)
     web = dict(meta, topics_searched=len(topics_done), projects=[

@@ -171,6 +171,7 @@
       var hash = decodeURIComponent(location.hash.slice(1));
       if (hash && data.category_counts && data.category_counts[hash] != null) state.category = hash;
       $("foot").innerHTML = "Catalog generated " + new Date(data.generated_at).toLocaleString() + " · " + fmtInt(data.project_count) + " repositories · OpenScores v" + String(data.version).replace(/[<>&]/g, "") + " · full data: data/catalog.json" +
+        (data.license ? ' · data <a href="' + esc(data.license_url || "#") + '" target="_blank" rel="noopener">' + esc(data.license).replace("CC-BY-4.0", "CC BY 4.0") + "</a>" : "") +
         ' · run by the <a href="https://openintelligence.foundation" target="_blank" rel="noopener">Open Intelligence Foundation</a>';
       render();
     }).catch(function (err) {

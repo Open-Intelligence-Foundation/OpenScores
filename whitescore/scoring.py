@@ -138,7 +138,8 @@ def popularity_components(m: Metrics, benchmarks: Optional[Dict[str, int]] = Non
     b = benchmarks or config.POPULARITY_BENCHMARKS
     return {
         "stars": n_log(_num(m, "stars"), b["stars"]),
-        "star_growth": n_log(_num(m, "stars_90d"), b["star_growth"]),
+        # unknown growth (under a week of star history) scores neutral, like a missing response time
+        "star_growth": n_log(_num(m, "stars_90d"), b["star_growth"]) if m.get("stars_90d") is not None else 50.0,
         "forks": n_log(_num(m, "forks"), b["forks"]),
         "fork_growth": n_log(_num(m, "forks_90d"), b["fork_growth"]),
         "watchers": n_log(_num(m, "watchers"), b["watchers"]),

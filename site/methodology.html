@@ -39,7 +39,7 @@
       <h2>How projects are found</h2>
       <p>The <a href="catalog.html">catalog</a> is built by sweeping GitHub's repository search across 170 AI-related topics (from <code>llm</code> and <code>ai-agents</code> to <code>gaussian-splatting</code> and <code>speech-synthesis</code>). Topics with more than 1,000 matches are split into star bands to get past GitHub's per-query cap. A second pass searches repository names and descriptions for AI terms, which catches well-known projects that carry no topics, and a seed list is fetched directly. Only non-fork, non-archived repositories with at least 200 stars are kept.</p>
       <p>Each repository gets an <strong>AI signal</strong>: two points per specific AI topic it matched, one point at most for generic tags such as <code>ai</code> or <code>chat</code>, and up to two for AI terms in its description. Repositories scoring below two are shown as <em>AI-adjacent</em> and excluded from the leaderboard. Awesome-lists, courses and paper collections are detected from names, topics and descriptions and kept in their own category. Categories are assigned by scoring each repository's topics (specific topics weigh 2, generic ones 0.25) and description keywords (1, or 2 when the keyword appears in the opening words) against sixteen category rules; the highest total wins.</p>
-      <p>The leaderboard then tracks the top catalog projects by stars (2,000 by default) that have a recognised open source license and at least 500 stars, merged with a seed list. Metrics come from the GitHub GraphQL and REST APIs and use a rolling 90-day window (180 days for maintainer metrics, 12 months for releases).</p>
+      <p>The leaderboard then tracks the top catalog projects by stars (2,000 by default) that have an OSI-approved open source licence (as detected by GitHub, with a short hand-checked list of repositories whose licence file GitHub cannot read) and at least 500 stars, merged with a seed list and minus a manual exclusion list for projects the keyword search mis-identifies. Seeds obey the licence rule too. Metrics come from the GitHub GraphQL and REST APIs and use a rolling 90-day window (180 days for maintainer metrics, 12 months for releases).</p>
 
       <h2>Normalisation helpers</h2>
       <pre class="formula">N_log(x, b)      = 100 × min(1, ln(1 + x) / ln(1 + b))      log-normalised count against a benchmark b
@@ -117,6 +117,14 @@ LOAD  = 100 × e^(−(issues + PRs opened in 90 days) / (60 × active maintainer
         <tr><td>Sustainability</td><td>Fragile</td><td>At risk</td><td>Moderate</td><td>Sustainable</td><td>Highly sustainable</td></tr>
       </table>
 
+      <h2>Selection terms</h2>
+      <p>The lists below are the exact terms and thresholds the current collector uses, exported with every run. A repository's AI signal counts 2 for each strong topic or keyword hit, 1 for a generic topic, up to 2 for further AI topics, and up to 2 for AI words in its description, where the weak words count half; projects under the minimum signal are shown in the catalog as AI-adjacent and are not scored.</p>
+      <div id="terms" class="terms"><p class="foot">Loading the term lists…</p></div>
+
+      <h2>Disputes and changes</h2>
+      <p>If a score, an input, a category or a listing looks wrong, <a href="https://github.com/Open-Intelligence-Foundation/OpenScores/issues/new?template=score-dispute.yml" target="_blank" rel="noopener">open a dispute</a>; every project panel on the leaderboard has a link that pre-fills the repository. Categories can be corrected by hand through <code>category_overrides.json</code> and listings removed through <code>excluded_repos.txt</code> in the repository, both of which are published in the term lists above.</p>
+      <p>The published data files (leaderboard, catalog and history JSON) are licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>; credit "OpenScores by the Open Intelligence Foundation" with a link to openscores.io.</p>
+
       <h2>Limitations</h2>
       <ul>
         <li>People metrics use up to 500 of the most recent default-branch commits in the 180-day window; very active repositories are sampled. When those 500 commits all fall inside the last 90 days, the 100 newest commits from the 90 days before are fetched separately so retention still has a prior window to compare against; if that fetch fails, retention is unknown and scores neutral rather than zero.</li>
@@ -125,11 +133,41 @@ LOAD  = 100 × e^(−(issues + PRs opened in 90 days) / (60 × active maintainer
         <li>CI reliability only sees GitHub Actions. Projects using other CI get a neutral score for that component.</li>
         <li>Dependency vulnerability data requires repository admin access and is not included; the risk score uses the presence of a security policy instead.</li>
         <li>External engagement is estimated from the maintainer share among the most recent issue and PR authors.</li>
+        <li>Star growth needs at least a week of recorded star counts; until then it is unknown and scores a neutral 50 in popularity, and it is an extrapolation until 90 days have been recorded.</li>
       </ul>
       <h2>Colour coding</h2>
       <p>Every score meter on the leaderboard is coloured by its band so that areas of concern stand out: <strong>strong</strong> (70–100) is green, <strong>adequate</strong> (50–69) is the neutral blue, <strong>weak</strong> (25–49) is amber and <strong>concern</strong> (0–24) is red. Risk is read the other way round, because a high risk score is the bad outcome: 0–24 is green (low risk), 25–49 blue (moderate), 50–74 amber (high) and 75–100 red (critical). The number itself always stays in the text colour; the colour is carried by the meter, and the band name appears when hovering a score.</p>
       <p class="foot">All weights, benchmarks and windows are defined in <code>whitescore/config.py</code> and exported with each data file. OpenScores is run by the <a href="https://openintelligence.foundation" target="_blank" rel="noopener">Open Intelligence Foundation</a>.</p>
     </article>
   </div>
+<script>
+(function () {
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function list(title, items, note) {
+    if (!items || !items.length) return "";
+    return '<details class="section"><summary><span>' + esc(title) + '</span><span class="sum">' + items.length + "</span></summary><div class=\"comp\">" +
+      (note ? "<p>" + esc(note) + "</p>" : "") + '<p class="termlist">' + items.map(function (t) { return '<span class="chip">' + esc(t) + "</span>"; }).join(" ") + "</p></div></details>";
+  }
+  fetch("data/terms.json", { cache: "no-cache" }).then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(function (t) {
+    var overrides = Object.keys(t.license_overrides || {}).map(function (k) { return k + " → " + t.license_overrides[k]; });
+    var cats = Object.keys(t.category_overrides || {}).map(function (k) { return k + " → " + t.category_overrides[k]; });
+    document.getElementById("terms").innerHTML =
+      "<p>Minimum AI signal " + esc(t.min_signal) + " · at least " + esc(t.min_stars) + " stars for the leaderboard (" + esc(t.catalog_min_stars) + " for the catalog)" +
+      (t.require_license ? " · OSI-approved licence required" : " · licence check disabled") + "</p>" +
+      list("AI topics searched", t.ai_topics, "GitHub topics the catalog sweep queries; a match counts as a strong hit unless the topic is generic.") +
+      list("Generic topics", t.generic_topics, "Topics too broad to identify an AI project on their own; they count once.") +
+      list("Keyword searches", t.keyword_queries, "Name and description searches for projects without AI topics; a hit counts as strong.") +
+      list("AI words (strong)", t.ai_words, "Words in a description that count once each, up to two.") +
+      list("AI words (weak)", t.weak_ai_words, "Words that also occur in ordinary software; two of them count as one.") +
+      list("Accepted licences", t.osi_licenses) +
+      list("Licence overrides", overrides, "Repositories whose licence GitHub cannot detect, checked by hand.") +
+      list("Seed repositories", t.seeds, "Always tracked, subject to the licence rule.") +
+      list("Excluded repositories", t.excluded, "Never scored; listed in the catalog only.") +
+      list("Category overrides", cats);
+  }).catch(function (err) {
+    document.getElementById("terms").innerHTML = '<p class="foot">The term lists could not be loaded (' + esc(err.message) + '); they are defined in whitescore/config.py and whitescore/discover.py.</p>';
+  });
+})();
+</script>
 </body>
 </html>

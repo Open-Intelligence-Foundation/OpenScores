@@ -146,7 +146,35 @@ FULL_REFRESH_DAYS = env_float("FULL_REFRESH_DAYS", 1)
 MAX_FULL_COLLECT = env_int("MAX_FULL_COLLECT", 350)
 LIGHT_BATCH = env_int("LIGHT_BATCH", 50)         # repositories per light-refresh GraphQL request
 PAGES_PER_TOPIC = env_int("PAGES_PER_TOPIC", 2)  # 100 results per page
+# Licence policy: a tracked project needs an OSI-approved licence, as detected
+# by GitHub (SPDX identifiers below; both the plain and the -only/-or-later
+# spellings). Creative Commons licences, public-domain dedications and source-
+# available licences do not qualify. REQUIRE_RECOGNIZED_LICENSE=false disables
+# the check entirely.
 REQUIRE_RECOGNIZED_LICENSE = env_bool("REQUIRE_RECOGNIZED_LICENSE", True)
+OSI_APPROVED_LICENSES = frozenset({
+    "MIT", "MIT-0", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "0BSD", "ISC", "MPL-2.0",
+    "GPL-2.0", "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0", "GPL-3.0-only", "GPL-3.0-or-later",
+    "LGPL-2.1", "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0", "LGPL-3.0-only", "LGPL-3.0-or-later",
+    "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later", "EPL-1.0", "EPL-2.0", "CDDL-1.0", "Unlicense",
+    "BSL-1.0", "Zlib", "Artistic-2.0", "EUPL-1.1", "EUPL-1.2", "PostgreSQL", "NCSA", "OFL-1.1", "UPL-1.0",
+    "MulanPSL-2.0", "CECILL-2.1", "OSL-3.0", "AFL-3.0", "MS-PL", "MS-RL", "Python-2.0", "ECL-2.0", "LPPL-1.3c",
+})
+# Repositories whose licence GitHub cannot detect (a non-standard LICENSE file
+# layout) but which are under an OSI-approved licence. The value is used as the
+# project's licence. Checked by hand; keep the reason next to each entry.
+LICENSE_OVERRIDES = {
+    "pytorch/pytorch": "BSD-3-Clause",              # BSD-style licence with many copyright holders listed first
+    "NVIDIA/TensorRT-LLM": "Apache-2.0",            # LICENSE names Apache 2.0 and links to the text
+    "modelcontextprotocol/servers": "Apache-2.0",   # MIT to Apache-2.0 transition notice precedes the text
+    "mozilla-ai/llamafile": "Apache-2.0",           # Apache 2.0 with the bundled llama.cpp MIT notice
+    "TabbyML/tabby": "Apache-2.0",                  # Apache 2.0 except the ee/ directory
+    "microsoft/autogen": "MIT",                     # code is MIT (LICENSE-CODE); GitHub reads the CC-BY docs licence
+}
+# Licence of the published data files (leaderboard, catalog, history).
+DATA_LICENSE = "CC-BY-4.0"
+DATA_LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/"
+DATA_ATTRIBUTION = "OpenScores by the Open Intelligence Foundation (openscores.io)"
 MAX_COMMIT_PAGES = env_int("MAX_COMMIT_PAGES", 5)  # 100 commits per page
 WORKERS = env_int("WORKERS", 6)                 # concurrent repositories; well under GitHub's 100-concurrent-request limit
 HISTORY_MAX_POINTS = env_int("HISTORY_MAX_POINTS", 120)  # ~4 months of daily points per project

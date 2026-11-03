@@ -13,7 +13,8 @@ from typing import Dict, List, Optional, Tuple
 
 from . import __version__, config
 from .collect import RepositoryForbidden, collect_repo
-from .discover import discover, select_repos
+from .discover import (AI_WORDS, WEAK_AI_WORDS, discover, effective_license, license_allowed, load_category_overrides,
+                       load_exclusions, select_repos)
 from .github import GitHubClient, GitHubError
 from .incremental import apply_light, fetch_light, load_cache, plan_collection, prune_cache, save_cache
 from .scoring import interpret, score_all
@@ -25,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "site" / "data"
 LEADERBOARD_PATH = DATA_DIR / "leaderboard.json"
 HISTORY_PATH = DATA_DIR / "history.json"
+TERMS_FILE = "terms.json"                     # the selection rules, published next to the leaderboard
 SEED_FILE = ROOT / "seed_repos.txt"
 CATALOG_PATH = DATA_DIR / "catalog.json"
 CACHE_PATH = ROOT / "data" / "metrics-cache.json"   # carried between runs by the workflow, not committed
@@ -152,6 +154,27 @@ def previous_scores(history: Dict[str, list], full_name: str, day: str, days_bac
     return candidates[-1] if candidates else None
 
 
+def selection_terms() -> dict:
+    """Everything that decides which projects are tracked, as published data."""
+    return {
+        "ai_topics": list(config.AI_TOPICS),
+        "generic_topics": sorted(config.GENERIC_TOPICS),
+        "keyword_queries": list(config.KEYWORD_QUERIES),
+        "ai_words": [w.strip() for w in AI_WORDS],
+        "weak_ai_words": list(WEAK_AI_WORDS),
+        "min_signal": config.CATALOG_MIN_SIGNAL,
+        "min_stars": config.MIN_STARS,
+        "catalog_min_stars": config.CATALOG_MIN_STARS,
+        "require_license": config.REQUIRE_RECOGNIZED_LICENSE,
+        "osi_licenses": sorted(config.OSI_APPROVED_LICENSES),
+        "license_overrides": dict(config.LICENSE_OVERRIDES),
+        "seeds": sorted(set(config.SEED_REPOS) | set(load_seed_file())),
+        "excluded": load_exclusions(),
+        "category_overrides": load_category_overrides(),
+        "categories": [name for name, _ in config.CATEGORY_RULES] + [config.DEFAULT_CATEGORY],
+    }
+
+
 def build_project(metrics: dict) -> dict:
     scores = score_all(metrics)
     bands = {k: interpret(k, scores[k]) for k in ("maturity", "health", "popularity", "risk", "sustainability")}
@@ -205,6 +228,8 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
     token_pool = build_pool(client, TOKEN_PREFS_PATH)
     max_repos = max_repos or config.MAX_REPOS
 
+    excluded = load_exclusions()
+    category_overrides = load_category_overrides()
     if repos:
         targets = repos
         discovered = {}
@@ -214,7 +239,8 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             log.info("using %d candidates from %s", len(discovered), CATALOG_PATH)
         else:
             discovered = discover(client)
-        targets = select_repos(discovered, seeds=config.SEED_REPOS + load_seed_file(), max_repos=max_repos)
+        targets = select_repos(discovered, seeds=config.SEED_REPOS + load_seed_file(), max_repos=max_repos,
+                               exclude=excluded)
     log.info("Tracking %d repositories (%d candidates)", len(targets), len(discovered))
     history = prune_history(load_json(HISTORY_PATH, {}))
 
@@ -240,7 +266,14 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         return metrics
 
     def finish(metrics: dict) -> dict:
-        return build_project(apply_star_history(merge_topics(metrics), history, day))
+        metrics = merge_topics(metrics)
+        metrics["license"] = effective_license(metrics.get("license"), metrics["full_name"])
+        if metrics["license"] in config.OSI_APPROVED_LICENSES:
+            metrics["has_license"] = True
+        override = category_overrides.get(metrics["full_name"].lower())
+        if override:
+            metrics["category"] = override
+        return build_project(apply_star_history(metrics, history, day))
 
     def work(full_name: str) -> Optional[dict]:
         try:
@@ -304,6 +337,13 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         if deferred:
             log.info("%d repositories have no cached metrics yet and wait for the next run", len(deferred))
 
+    # the licence policy applies to seeds too, which bypass the candidate filter
+    unlicensed = [p for p in projects if not license_allowed(p["license"], p["full_name"])]
+    if unlicensed:
+        log.info("%d repositories left off the board by the licence policy: %s", len(unlicensed),
+                 ", ".join("%s (%s)" % (p["full_name"], p["license"] or "none") for p in unlicensed[:20]))
+        projects = [p for p in projects if license_allowed(p["license"], p["full_name"])]
+
     # de-duplicate on canonical name (renames can collapse two targets)
     seen = set()
     unique = []
@@ -337,6 +377,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             "health": config.HEALTH_WEIGHTS, "popularity": config.POPULARITY_WEIGHTS,
             "risk": config.RISK_WEIGHTS, "sustainability": config.SUSTAINABILITY_WEIGHTS,
         },
+        "license": config.DATA_LICENSE, "license_url": config.DATA_LICENSE_URL, "attribution": config.DATA_ATTRIBUTION,
         "failures": failures,
         "deferred": deferred,
         "sample": False,
@@ -348,6 +389,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
     else:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         LEADERBOARD_PATH.write_text(json.dumps(leaderboard, separators=(",", ":")))
+        (DATA_DIR / TERMS_FILE).write_text(json.dumps(selection_terms(), separators=(",", ":")))
         HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
         save_cache(CACHE_PATH, prune_cache(cache, targets, now))
         save_preferences(TOKEN_PREFS_PATH, token_pool, keep=None if repos else targets)

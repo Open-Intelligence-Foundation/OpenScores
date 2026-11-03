@@ -247,6 +247,11 @@
       '<span class="sum">' + p.scores[key].toFixed(1) + " · " + esc(p.bands[key]) + "</span></summary><div class=\"comp\">" + rows + "</div></details>";
   }
 
+  var REPO_URL = "https://github.com/Open-Intelligence-Foundation/OpenScores";
+  function disputeUrl(p) {
+    return REPO_URL + "/issues/new?template=score-dispute.yml&title=" + encodeURIComponent("Dispute: " + p.full_name) +
+      "&repository=" + encodeURIComponent(p.full_name);
+  }
   function openProject(id, push) {
     var p = null;
     for (var i = 0; i < projects.length; i++) if (projects[i].full_name === id) { p = projects[i]; break; }
@@ -275,7 +280,8 @@
       '<div class="meta"><span>#' + p.rank + " overall</span><span>" + esc(p.category) + "</span>" +
       (p.language ? "<span>" + esc(p.language) + "</span>" : "") + (p.license ? "<span>" + esc(p.license) + "</span>" : "") +
       '<a href="' + esc(p.url) + '" target="_blank" rel="noopener">GitHub ↗</a>' +
-      (p.homepage ? '<a href="' + esc(p.homepage) + '" target="_blank" rel="noopener">Website ↗</a>' : "") + "</div>" +
+      (p.homepage ? '<a href="' + esc(p.homepage) + '" target="_blank" rel="noopener">Website ↗</a>' : "") +
+      '<a href="' + disputeUrl(p) + '" target="_blank" rel="noopener" title="Open an issue if a score, the category or the listing looks wrong">Dispute this score ↗</a></div>' +
       '<div class="cards"><div class="card overall" title="' + esc(DESCRIPTIONS.overall) + '"><div><div class="label">Overall White Score</div><div class="value">' + p.scores.overall.toFixed(1) + "</div>" +
       '<div class="meter b-' + overallBand[0] + '"><i style="width:' + Math.max(0, Math.min(100, p.scores.overall)) + '%"></i></div>' +
       '<div class="band">' + overallBand[1] + ' · maturity, health, popularity 0.25 each · sustainability 0.15 · low risk 0.10</div></div><div>' + sparkline(series, "o") + "</div></div>" + cards + "</div>" +
@@ -371,6 +377,7 @@
       $("foot").innerHTML = "Last refreshed " + fmtDate(data.generated_at) + " · " + fmtInt(data.project_count) + " projects · collector v" + esc(data.version) +
         (data.failures && data.failures.length ? " · " + data.failures.length + " repositories could not be collected" : "") +
         ' · <a href="methodology.html">How scores are computed</a>' +
+        (data.license ? ' · data <a href="' + esc(data.license_url || "#") + '" target="_blank" rel="noopener">' + esc(data.license).replace("CC-BY-4.0", "CC BY 4.0") + "</a>" : "") +
         ' · OpenScores is run by the <a href="https://openintelligence.foundation" target="_blank" rel="noopener">Open Intelligence Foundation</a>';
       renderTiles();
       renderTable();
