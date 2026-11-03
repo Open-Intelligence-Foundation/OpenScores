@@ -71,7 +71,7 @@ BP  = 100 × e^(−open issues / (2 × max(1, issues closed in last 90 days)))
 CD  = N_log(active contributors in last 90 days, 20)
 RF  = N_recency(days since last release, 90)
 CI  = 100 × successful workflow runs / total workflow runs (last 90 days)</pre>
-      <p>First response is the first comment or review by someone other than the author (bots excluded), or the close/merge event, measured over the 40 most recent issues and PRs. Unanswered items older than seven days count as their current age so silence is penalised. Where a signal is unobservable (no issues, no workflow runs) the component is neutral at 50.</p>
+      <p>First response is the first comment or review by someone other than the author, or the close/merge event, measured over the 40 most recent issues and PRs. Bots do not count as responders: GitHub App accounts, logins on a known-bot list or ending in [bot], -bot, assistant or automation, and any account that answers within a minute of the item being opened in most of the sampled items, which is how auto-responders running as ordinary user accounts are caught; the next human reply is measured instead. Pull requests opened by dependabot, renovate and github-actions are left out of the PR counts. Unanswered items older than seven days count as their current age so silence is penalised. Where a signal is unobservable (no issues, no workflow runs) the component is neutral at 50.</p>
 
       <h2>White Popularity Score</h2>
       <pre class="formula">WPS = 0.25·S + 0.20·SG + 0.15·F + 0.10·FG + 0.10·W + 0.10·CR + 0.10·EA
@@ -120,6 +120,7 @@ LOAD  = 100 × e^(−(issues + PRs opened in 90 days) / (60 × active maintainer
       <h2>Limitations</h2>
       <ul>
         <li>People metrics use up to 500 of the most recent default-branch commits in the 180-day window; very active repositories are sampled. When those 500 commits all fall inside the last 90 days, the 100 newest commits from the 90 days before are fetched separately so retention still has a prior window to compare against; if that fetch fails, retention is unknown and scores neutral rather than zero.</li>
+        <li>Commit volume (commits in the last 90 days) is GitHub's count of all default-branch commits and includes automated commits such as dependency updates and release bumps; only the people metrics exclude bots.</li>
         <li>Documentation flags are heuristic (file names and README keywords), not an assessment of quality.</li>
         <li>CI reliability only sees GitHub Actions. Projects using other CI get a neutral score for that component.</li>
         <li>Dependency vulnerability data requires repository admin access and is not included; the risk score uses the presence of a security policy instead.</li>

@@ -51,3 +51,13 @@ def test_core_query_has_no_sponsors_fields():
     assert "fundingLinks" not in queries.REPO_CORE
     assert "mentionableUsers" not in queries.REPO_CORE
     assert "hasSponsorsListing" in queries.REPO_SPONSORS
+
+
+def test_recent_item_actors_carry_typename_and_three_comments():
+    """Bot detection needs the actor type, and a human reply after a dropped
+    auto-responder needs a third comment (collect._median_response_hours)."""
+    for key in ("recentIssues", "recentPRs"):
+        text = dict(queries.REPO_CORE_FIELDS)[key]
+        assert "author { __typename login }" in text
+        assert "author { login }" not in text
+        assert "comments(first: 3)" in text
