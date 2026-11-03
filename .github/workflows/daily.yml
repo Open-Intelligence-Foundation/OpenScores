@@ -158,9 +158,17 @@ jobs:
       # record of the scores and keeps the repository active, so GitHub does
       # not disable the schedule after 60 days without commits.
       - name: Commit the score history once a day
+        # A run queued behind another may have checked out before that run
+        # committed today's history, so the check reads origin/main rather
+        # than the checkout, and a conflict on the file is settled in favour
+        # of this run's copy, which was built from the newer state. The Pages
+        # deploy does not depend on this commit, so a lost push race must not
+        # fail the run.
+        continue-on-error: true
         run: |
           today=$(date -u +%F)
-          if git show HEAD:site/data/history.json 2>/dev/null | python -c '
+          git fetch --quiet origin main
+          if git show origin/main:site/data/history.json 2>/dev/null | python -c '
           import json, sys
           try:
               history = json.load(sys.stdin)
@@ -172,15 +180,15 @@ jobs:
             exit 0
           fi
           git add site/data/history.json
-          if git diff --cached --quiet; then
+          if git diff --cached --quiet origin/main -- site/data/history.json; then
             echo "Score history unchanged"
             exit 0
           fi
           git config user.name "whitescore-bot"
           git config user.email "whitescore-bot@users.noreply.github.com"
           git commit -m "data: score history $today"
-          git pull --rebase origin main
-          git push
+          git rebase -X theirs origin/main
+          git push origin HEAD:main
 
   deploy:
     needs: collect
