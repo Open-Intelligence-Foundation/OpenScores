@@ -146,7 +146,12 @@ def main() -> None:
     }
     pipeline.DATA_DIR.mkdir(parents=True, exist_ok=True)
     pipeline.LEADERBOARD_PATH.write_text(json.dumps(board, separators=(",", ":")))
-    pipeline.HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
+    # Fabricated history must never replace real history: it would feed the
+    # 7-day deltas and star growth with made-up points.
+    if pipeline.HISTORY_PATH.exists():
+        print("kept the existing %s (sample history not written)" % pipeline.HISTORY_PATH)
+    else:
+        pipeline.HISTORY_PATH.write_text(json.dumps(history, separators=(",", ":")))
     print("wrote sample data for %d projects to %s" % (len(projects), pipeline.DATA_DIR))
 
 

@@ -84,7 +84,7 @@ is the best primary token: it reads everything the collector asks for. A
 fine-grained token also works, with two caveats the collector handles on its
 own and logs once per run: fine-grained tokens are refused GitHub Sponsors
 data (the sponsorship signal then comes from funding links only) and the
-stargazer timeline in GraphQL (recent stars are then read over REST instead).
+stargazer timeline in GraphQL. GitHub has since stopped serving the stargazer timeline altogether, so stars gained in the window are derived from the daily star counts in `site/data/history.json` (exact after 90 days of history, extrapolated and flagged as estimated before that).
 
 Some organizations refuse one kind of token outright (SAML single sign-on, or
 an organization policy against classic tokens); GitHub then answers every

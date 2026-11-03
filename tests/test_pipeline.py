@@ -153,3 +153,49 @@ def test_a_failed_collection_keeps_the_cached_project_on_the_board(tmp_path, mon
     assert board["project_count"] == 2                            # still on the board
     kept = next(p for p in board["projects"] if p["full_name"] == "a/one")
     assert kept["metrics"]["from_cache"] is True
+
+
+# ---------------------------------------------------------------- star growth and history hygiene
+def _series(day_stars):
+    return [{"d": d, "o": 50.0, "stars": s} for d, s in day_stars]
+
+
+def test_star_growth_is_exact_once_the_history_spans_the_window():
+    series = _series([("2026-01-01", 1000), ("2026-02-01", 1500), ("2026-03-15", 2000), ("2026-05-20", 2600)])
+    # 2026-05-25 minus 90 days is 2026-02-24: the most recent point beyond that is 2026-02-01
+    assert pipeline.star_growth_from_history(series, 2700, "2026-05-25") == (1200, False)
+
+
+def test_star_growth_is_extrapolated_from_a_short_history():
+    series = _series([("2026-05-01", 1000), ("2026-05-10", 1090)])
+    gained, estimated = pipeline.star_growth_from_history(series, 1100, "2026-05-11")
+    assert estimated is True
+    assert gained == 900            # 100 stars in 10 days -> 900 over 90
+
+
+def test_star_growth_is_unknown_with_too_little_history():
+    series = _series([("2026-05-09", 1000)])
+    assert pipeline.star_growth_from_history(series, 1100, "2026-05-11") == (None, None)
+    assert pipeline.star_growth_from_history([], 1100, "2026-05-11") == (None, None)
+
+
+def test_apply_star_history_overrides_an_empty_collected_timeline():
+    history = {"a/one": _series([("2026-01-01", 100), ("2026-05-01", 400)])}
+    metrics = {"full_name": "a/one", "stars": 500, "stars_90d": 0, "stars_90d_estimated": False}
+    out = pipeline.apply_star_history(dict(metrics), history, "2026-05-25")
+    assert (out["stars_90d"], out["stars_90d_estimated"]) == (400, False)
+    # a repository with no usable history keeps a positive collected sample, or becomes unknown
+    kept = pipeline.apply_star_history({"full_name": "b/two", "stars": 50, "stars_90d": 7, "stars_90d_estimated": False},
+                                       history, "2026-05-25")
+    assert kept["stars_90d"] == 7
+    unknown = pipeline.apply_star_history({"full_name": "b/two", "stars": 50, "stars_90d": 0}, history, "2026-05-25")
+    assert unknown["stars_90d"] is None
+
+
+def test_prune_history_drops_points_before_the_first_real_collection():
+    history = {"a/one": _series([("2026-08-15", 10), ("2026-10-28", 20), ("2026-10-29", 30)]),
+               "b/two": _series([("2026-09-01", 5)])}
+    pruned = pipeline.prune_history(history, "2026-10-29")
+    assert list(pruned) == ["a/one"]
+    assert [pt["d"] for pt in pruned["a/one"]] == ["2026-10-29"]
+    assert pipeline.prune_history(history, "") == history

@@ -150,6 +150,15 @@ REQUIRE_RECOGNIZED_LICENSE = env_bool("REQUIRE_RECOGNIZED_LICENSE", True)
 MAX_COMMIT_PAGES = env_int("MAX_COMMIT_PAGES", 5)  # 100 commits per page
 WORKERS = env_int("WORKERS", 6)                 # concurrent repositories; well under GitHub's 100-concurrent-request limit
 HISTORY_MAX_POINTS = env_int("HISTORY_MAX_POINTS", 120)  # ~4 months of daily points per project
+# History points dated before this day are dropped on load. The first real
+# collection ran on 2026-10-29; the points before it were fabricated by the
+# sample-data script and must not feed 7-day deltas or star growth.
+HISTORY_IGNORE_BEFORE = os.environ.get("HISTORY_IGNORE_BEFORE", "2026-10-29")
+# Star growth: GitHub no longer serves the stargazer timeline, so stars gained
+# in the window are read from our own daily star counts. With fewer than
+# WINDOW_DAYS of history the figure is extrapolated from the days observed and
+# marked as estimated; with fewer than this many days it is left unknown.
+HISTORY_MIN_SPAN_DAYS = env_int("HISTORY_MIN_SPAN_DAYS", 7)
 
 # Category rules. Each category lists topics (weight 2) and description keywords
 # (weight 1). A repository gets the category with the highest total; ties go to

@@ -80,7 +80,8 @@ S  = N_log(total stars, 50,000)          SG = N_log(new stars in last 90 days, 5
 F  = N_log(total forks, 10,000)          FG = N_log(new forks in last 90 days, 1,000)
 W  = N_log(watchers, 1,000)              CR = N_log(total contributors, 500)
 EA = N_log(issues + PRs opened by non-maintainers in last 90 days, 1,000)</pre>
-      <p>Benchmarks are tuned for the AI ecosystem, where star counts run high. Star and fork growth are measured from the 100 most recent stargazers and forks; when all 100 fall inside the window, the 90-day figure is extrapolated from the observed rate and marked as estimated.</p>
+      <p>Benchmarks are tuned for the AI ecosystem, where star counts run high. Fork growth is measured from the 100 most recent forks; when all 100 fall inside the window, the 90-day figure is extrapolated from the observed rate and marked as estimated. GitHub no longer serves the stargazer timeline, so star growth is read from the daily star counts OpenScores records for each project: exact once 90 days of history exist, extrapolated from the days observed (and marked as estimated) before that, and unknown for projects with under a week of history.</p>
+      <p>The 7-day change shown next to the overall score and the star count compares today's values with the most recent recorded day at least seven days earlier; a project without seven days of history shows no change yet. History begins on 29 October 2026, the first real collection.</p>
 
       <h2>White Risk Score</h2>
       <pre class="formula">WRS = 0.20·BUS + 0.15·CONC + 0.15·CS + 0.10·RS + 0.10·SEC + 0.10·STALE + 0.10·OWN + 0.10·ARCH

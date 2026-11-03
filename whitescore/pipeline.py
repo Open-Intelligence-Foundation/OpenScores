@@ -9,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import __version__, config
 from .collect import RepositoryForbidden, collect_repo
@@ -79,6 +79,69 @@ def update_history(history: Dict[str, list], projects: List[dict], day: str) -> 
             series.append(point)
         del series[:-config.HISTORY_MAX_POINTS]
     return history
+
+
+def prune_history(history: Dict[str, list], ignore_before: Optional[str] = None) -> Dict[str, list]:
+    """Drop history points dated before ``ignore_before`` (fabricated sample
+    points from before the first real collection)."""
+    cutoff = config.HISTORY_IGNORE_BEFORE if ignore_before is None else ignore_before
+    if not cutoff:
+        return history
+    pruned = {}
+    dropped = 0
+    for name, series in history.items():
+        kept = [pt for pt in series if pt.get("d", "") >= cutoff]
+        dropped += len(series) - len(kept)
+        if kept:
+            pruned[name] = kept
+    if dropped:
+        log.info("dropped %d history points dated before %s", dropped, cutoff)
+    return pruned
+
+
+def star_growth_from_history(series: list, stars_now: int, day: str,
+                             window_days: Optional[int] = None) -> Tuple[Optional[int], Optional[bool]]:
+    """Stars gained over the window, from the daily star counts in ``series``.
+
+    Exact once a point at least ``window_days`` old exists; before that an
+    extrapolation from the oldest point (flagged estimated) when it is at
+    least HISTORY_MIN_SPAN_DAYS old; otherwise (None, None)."""
+    window = config.WINDOW_DAYS if window_days is None else window_days
+    target = datetime.strptime(day, "%Y-%m-%d")
+    dated = []
+    for pt in series or []:
+        if pt.get("stars") is None:
+            continue
+        try:
+            age = (target - datetime.strptime(pt["d"], "%Y-%m-%d")).days
+        except (KeyError, ValueError):
+            continue
+        dated.append((age, int(pt["stars"])))
+    exact = [p for p in dated if p[0] >= window]
+    if exact:
+        age, stars = min(exact)             # the most recent point beyond the window
+        return max(0, int(stars_now) - stars), False
+    if not dated:
+        return None, None
+    age, stars = max(dated)                 # the oldest point we have
+    if age < config.HISTORY_MIN_SPAN_DAYS:
+        return None, None
+    gained = max(0, int(stars_now) - stars)
+    return int(round(gained / float(age) * window)), True
+
+
+def apply_star_history(metrics: dict, history: Dict[str, list], day: str) -> dict:
+    """Fill stars_90d from the daily history. GitHub stopped serving the
+    stargazer timeline, so the sample collected with the repository is
+    normally empty; it is only kept while the history is too short to use."""
+    series = history.get(metrics["full_name"]) or []
+    gained, estimated = star_growth_from_history(series, metrics.get("stars") or 0, day)
+    if gained is None:
+        if not metrics.get("stars_90d"):
+            metrics["stars_90d"], metrics["stars_90d_estimated"] = None, None
+        return metrics
+    metrics["stars_90d"], metrics["stars_90d_estimated"] = gained, estimated
+    return metrics
 
 
 def previous_scores(history: Dict[str, list], full_name: str, day: str, days_back: int = 7) -> Optional[dict]:
@@ -153,6 +216,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             discovered = discover(client)
         targets = select_repos(discovered, seeds=config.SEED_REPOS + load_seed_file(), max_repos=max_repos)
     log.info("Tracking %d repositories (%d candidates)", len(targets), len(discovered))
+    history = prune_history(load_json(HISTORY_PATH, {}))
 
     # Incremental plan: full collections for new/stale repos, cache + light refresh for the rest.
     cache = load_cache(CACHE_PATH)
@@ -175,6 +239,9 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             metrics["topics"] = sorted(set(metrics["topics"]) | set(extra))[:15]
         return metrics
 
+    def finish(metrics: dict) -> dict:
+        return build_project(apply_star_history(merge_topics(metrics), history, day))
+
     def work(full_name: str) -> Optional[dict]:
         try:
             metrics = collect_with_fallback(token_pool, full_name, now, stamp)
@@ -195,7 +262,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
             cache[metrics["full_name"].lower()] = {"collected_at": stamp, "metrics": dict(metrics)}
             if full_name.lower() != metrics["full_name"].lower():
                 cache.pop(full_name.lower(), None)  # renamed: drop the stale key
-        return build_project(merge_topics(metrics))
+        return finish(metrics)
 
     if full:
         with ThreadPoolExecutor(max_workers=max(1, config.WORKERS)) as pool:
@@ -231,7 +298,7 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
                 continue
             metrics = apply_light(entry["metrics"], light.get(name.lower()), now)
             entry["metrics"] = metrics
-            projects.append(build_project(merge_topics(dict(metrics))))
+            projects.append(finish(dict(metrics)))
         log.info("refreshed %d cached repositories with %d light payloads (requests=%d, graphql points=%d)",
                  len(reuse) - len(deferred), len(light), *token_pool.request_totals())
         if deferred:
@@ -247,7 +314,6 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         unique.append(p)
     projects = unique
 
-    history = load_json(HISTORY_PATH, {})
     history = update_history(history, projects, day)
     for p in projects:
         prev = previous_scores(history, p["full_name"], day)
