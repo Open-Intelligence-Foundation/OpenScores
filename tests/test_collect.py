@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from whitescore import collect
+from whitescore import collect, scoring
 
 NOW = datetime(2026, 10, 14, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -360,3 +360,74 @@ def test_issue_templates_are_read_from_the_file_tree():
     repo["dotgithub"] = None
     repo["docsDir"] = {"entries": [{"name": "issue_template.md", "type": "blob"}]}
     assert has_templates(repo)
+
+
+def _counts():
+    return {k: 0 for k in ("issuesOpened", "issuesClosed", "prsOpened", "prsMerged", "prsClosed", "staleIssues", "breaking")}
+
+
+def busy_repo(sample):
+    """A repository whose 180-day history (3000 commits) is far larger than the
+    sample the collector pages through."""
+    repo = fake_repo()
+    repo["defaultBranchRef"]["target"]["recent90"] = {"totalCount": 1500}
+    repo["defaultBranchRef"]["target"]["history"] = {
+        "totalCount": 3000, "pageInfo": {"hasNextPage": True, "endCursor": "c500"}, "nodes": sample}
+    return repo
+
+
+def test_truncated_sample_uses_separately_fetched_prior_window():
+    # 500 sampled commits, all inside the last 90 days: alice, bob and carol are current.
+    sample = [commit(d % 60, ("alice", "bob", "carol")[d % 3]) for d in range(500)]
+    prior = [commit(95 + d % 80, ("alice", "bob", "dave")[d % 3]) for d in range(100)]
+    repo = busy_repo(sample)
+    cutoff90 = NOW - timedelta(days=90)
+    assert collect.prior_window_unsampled(repo, sample, cutoff90) is True
+
+    m = collect.build_metrics(repo, sample, _counts(), 300, None, NOW, prior_commits=prior)
+    assert m["commit_sample_truncated"] is True and m["commit_sample_size"] == 500
+    assert m["active_contributors_90d"] == 3
+    assert abs(m["contributor_retention"] - 2 / 3) < 1e-9     # alice and bob were active before, carol is new
+
+    # Fetched and empty: the project did not exist 90 days ago, nobody was retained.
+    assert collect.build_metrics(repo, sample, _counts(), 300, None, NOW, prior_commits=[])["contributor_retention"] == 0.0
+
+
+def test_truncated_sample_without_prior_window_leaves_retention_unknown():
+    sample = [commit(d % 60, "alice") for d in range(500)]
+    repo = busy_repo(sample)
+    m = collect.build_metrics(repo, sample, _counts(), 300, None, NOW)   # prior window not fetched
+    assert m["commit_sample_truncated"] is True
+    assert m["contributor_retention"] is None
+    assert scoring.sustainability_components(m)["retention"] == 50.0    # unknown scores neutral, not zero
+    assert scoring.sustainability_components(dict(m, contributor_retention=0.0))["retention"] == 0.0
+
+    # A truncated sample that still reaches into the prior window needs no extra fetch.
+    reaching = sample[:-1] + [commit(120, "alice")]
+    assert collect.prior_window_unsampled(repo, reaching, NOW - timedelta(days=90)) is False
+    assert collect.build_metrics(repo, reaching, _counts(), 300, None, NOW)["contributor_retention"] == 1.0
+    # ...and neither does a complete sample.
+    assert collect.prior_window_unsampled(fake_repo(), fake_repo()["defaultBranchRef"]["target"]["history"]["nodes"],
+                                          NOW - timedelta(days=90)) is False
+
+
+class PriorWindowClient:
+    def __init__(self, nodes=None, fail=False):
+        self.nodes, self.fail, self.calls = nodes, fail, []
+
+    def graphql(self, query, variables=None):
+        self.calls.append((query, variables))
+        if self.fail:
+            raise collect.GitHubError("boom")
+        return {"repository": {"defaultBranchRef": {"target": {"history": {"nodes": self.nodes}}}}}
+
+
+def test_fetch_prior_window_bounds_the_query_and_tolerates_failure():
+    client = PriorWindowClient(nodes=[commit(100, "bob")])
+    nodes = collect.fetch_prior_window(client, "acme", "ai-tool", "2026-04-17T12:00:00Z", "2026-07-16T12:00:00Z")
+    assert nodes == [commit(100, "bob")]
+    query, variables = client.calls[0]
+    assert "until: $since90" in query and "since: $since180" in query
+    assert variables == {"owner": "acme", "name": "ai-tool",
+                         "since180": "2026-04-17T12:00:00Z", "since90": "2026-07-16T12:00:00Z"}
+    assert collect.fetch_prior_window(PriorWindowClient(fail=True), "acme", "ai-tool", "a", "b") is None

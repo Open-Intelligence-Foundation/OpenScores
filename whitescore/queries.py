@@ -195,6 +195,26 @@ query MoreHistory($owner: String!, $name: String!, $since180: GitTimestamp!, $af
 }
 """
 
+# The 90 days before the current window, fetched on its own when the commit
+# sample (up to MAX_COMMIT_PAGES pages of the last 180 days) is used up by the
+# last 90 days alone.  One page is enough to establish who was active before.
+PRIOR_HISTORY = """
+query PriorHistory($owner: String!, $name: String!, $since180: GitTimestamp!, $since90: GitTimestamp!) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef {
+      target {
+        ... on Commit {
+          history(since: $since180, until: $since90, first: 100) {
+            nodes { committedDate author { user { login } email name } }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 # Time-windowed counts via the search API (each alias is one search).
 COUNTS = """
 query RepoCounts(

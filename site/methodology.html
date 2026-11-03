@@ -101,7 +101,7 @@ ARCH  = 100 if archived, else 0  (archived projects score at least 90)</pre>
 
 MAINT = N_log(active maintainers in last 180 days, 8)
 DIV   = 100 × (1 − top contributor share)
-RET   = N_ratio(contributors active in the last 90 days who were also active in the prior 90 days)
+RET   = N_ratio(contributors active in the last 90 days who were also active in the prior 90 days); 50 when the prior window is unknown
 SPON  = 100 if funding links or a sponsors listing exist, else 0
 ORG   = 100 if owned by an organization, else 0
 GOV   = governance completeness (G from maturity)
@@ -119,7 +119,7 @@ LOAD  = 100 × e^(−(issues + PRs opened in 90 days) / (60 × active maintainer
 
       <h2>Limitations</h2>
       <ul>
-        <li>People metrics use up to 500 of the most recent default-branch commits in the 180-day window; very active repositories are sampled.</li>
+        <li>People metrics use up to 500 of the most recent default-branch commits in the 180-day window; very active repositories are sampled. When those 500 commits all fall inside the last 90 days, the 100 newest commits from the 90 days before are fetched separately so retention still has a prior window to compare against; if that fetch fails, retention is unknown and scores neutral rather than zero.</li>
         <li>Documentation flags are heuristic (file names and README keywords), not an assessment of quality.</li>
         <li>CI reliability only sees GitHub Actions. Projects using other CI get a neutral score for that component.</li>
         <li>Dependency vulnerability data requires repository admin access and is not included; the risk score uses the presence of a security policy instead.</li>

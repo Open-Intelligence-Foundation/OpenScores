@@ -62,7 +62,7 @@ def test_empty_metrics_are_safe_and_low():
     assert 0 <= s["maturity"] <= 100
     assert s["popularity"] == 0
     assert s["risk"] >= 60            # unknown everything is risky
-    assert s["sustainability"] <= 30
+    assert s["sustainability"] <= 35     # unknown retention is neutral (50), the rest is 0 or default
 
 
 def test_archived_projects_are_critical_risk():

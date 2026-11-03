@@ -177,7 +177,10 @@ def sustainability_components(m: Metrics) -> Dict[str, float]:
     active_maintainers = _num(m, "active_maintainers_180d")
     maintainers = n_log(active_maintainers, 8)
     maintainer_diversity = 100.0 * (1.0 - min(1.0, _num(m, "top_contributor_share")))
-    retention = n_ratio(_opt(m, "contributor_retention"))
+    retention_ratio = _opt(m, "contributor_retention")
+    # Unknown (the commit sample never reached the prior window) -> neutral 50,
+    # like _response_score; a ratio of 0 still scores 0.
+    retention = 50.0 if retention_ratio is None else n_ratio(retention_ratio)
     sponsorship = 100.0 if m.get("has_sponsorship") else 0.0
     org_backing = 100.0 if m.get("owner_is_org") else 0.0
     governance = governance_score(m)

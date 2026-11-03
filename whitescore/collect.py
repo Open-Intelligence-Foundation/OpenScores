@@ -17,8 +17,8 @@ from typing import Dict, List, Optional, Tuple
 from . import config
 from .discover import categorize
 from .github import GitHubClient, GitHubError, describe_errors
-from .queries import (COUNTS, MORE_HISTORY, REMOVABLE_CORE_FIELDS, REPO_EXTRAS, REPO_SPONSORS,
-                      build_repo_core, selection_at_line)
+from .queries import (COUNTS, MORE_HISTORY, PRIOR_HISTORY, REMOVABLE_CORE_FIELDS, REPO_EXTRAS,
+                      REPO_SPONSORS, build_repo_core, selection_at_line)
 
 log = logging.getLogger("whitescore.collect")
 
@@ -236,6 +236,42 @@ def fetch_commit_sample(client: GitHubClient, owner: str, name: str, repo: dict,
     return nodes
 
 
+def _history_total(repo: dict) -> int:
+    target = ((repo.get("defaultBranchRef") or {}).get("target") or {})
+    return int((target.get("history") or {}).get("totalCount") or 0)
+
+
+def prior_window_unsampled(repo: dict, commits: List[dict], cutoff90: datetime) -> bool:
+    """True when the commit sample stops short of the 180-day window and every
+    sampled commit is newer than ``cutoff90``: the sample then says nothing
+    about who was active in the 90 days before, and contributor retention
+    cannot be derived from it (very active projects exhaust the sample inside
+    the current window)."""
+    if _history_total(repo) <= len(commits):
+        return False
+    for c in commits:
+        dt = parse_dt(c.get("committedDate"))
+        if dt and dt < cutoff90:
+            return False
+    return True
+
+
+def fetch_prior_window(client: GitHubClient, owner: str, name: str, since180: str, since90: str
+                       ) -> Optional[List[dict]]:
+    """The newest commits between 180 and 90 days ago, or None when they could
+    not be fetched (the caller then leaves retention unknown)."""
+    try:
+        data = client.graphql(PRIOR_HISTORY, {"owner": owner, "name": name,
+                                              "since180": since180, "since90": since90})
+    except GitHubError as exc:
+        log.warning("prior commit window unavailable for %s/%s: %s", owner, name, exc)
+        return None
+    target = (((data.get("repository") or {}).get("defaultBranchRef") or {}).get("target"))
+    if target is None:
+        return None
+    return list(((target.get("history") or {}).get("nodes")) or [])
+
+
 def fetch_counts(client: GitHubClient, full_name: str, now: datetime) -> Dict[str, int]:
     d90 = (now - timedelta(days=config.WINDOW_DAYS)).strftime("%Y-%m-%d")
     d180 = (now - timedelta(days=config.STALE_ISSUE_DAYS)).strftime("%Y-%m-%d")
@@ -435,18 +471,27 @@ def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] =
     repo.setdefault("owner", {}).update(sponsors.get("owner") or {})
 
     commits = fetch_commit_sample(client, owner, name, repo, since180)
+    prior_commits = None
+    if prior_window_unsampled(repo, commits, now - timedelta(days=config.WINDOW_DAYS)):
+        prior_commits = fetch_prior_window(client, owner, name, since180, since90)
     counts = fetch_counts(client, full_name, now)
     contributors_total = fetch_contributor_count(client, full_name)
     if contributors_total is None:
         contributors_total = ((repo.get("mentionableUsers") or {}).get("totalCount"))
     ci_rate = fetch_ci_stats(client, full_name, now)
 
-    return build_metrics(repo, commits, counts, contributors_total, ci_rate, now)
+    return build_metrics(repo, commits, counts, contributors_total, ci_rate, now, prior_commits=prior_commits)
 
 
 def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],
-                  contributors_total: Optional[int], ci_rate: Optional[float], now: datetime) -> dict:
-    """Pure transformation from raw API payloads to the metrics dict."""
+                  contributors_total: Optional[int], ci_rate: Optional[float], now: datetime,
+                  prior_commits: Optional[List[dict]] = None) -> dict:
+    """Pure transformation from raw API payloads to the metrics dict.
+
+    ``prior_commits`` are commits from the 90 days before the current window,
+    fetched separately when the sample did not reach that far (see
+    ``prior_window_unsampled``); an empty list means the window was fetched
+    and held nothing, None that it was not fetched."""
     full_name = repo["nameWithOwner"]
     created = parse_dt(repo.get("createdAt"))
     target = ((repo.get("defaultBranchRef") or {}).get("target") or {})
@@ -467,16 +512,31 @@ def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],
             counts_90[key] += 1
         else:
             authors_prior.add(key)
-    history_total_180 = int((target.get("history") or {}).get("totalCount") or 0)
+    for c in prior_commits or []:
+        key = author_key(c.get("author"))
+        dt = parse_dt(c.get("committedDate"))
+        if key and dt and dt < cutoff90:
+            authors_prior.add(key)
+    history_total_180 = _history_total(repo)
     commits_90d = int((target.get("recent90") or {}).get("totalCount") or 0)
     sample_truncated = history_total_180 > len(commits)
+    prior_known = prior_commits is not None or not prior_window_unsampled(repo, commits, cutoff90)
 
     active_contributors_90d = len(counts_90)
     active_maintainers_180d = sum(1 for _, n in counts_180.items() if n >= 3)
     total_180 = sum(counts_180.values())
     top_share = (counts_180.most_common(1)[0][1] / float(total_180)) if total_180 else 0.0
     current_authors = set(counts_90)
-    retention = (len(current_authors & authors_prior) / float(len(current_authors))) if current_authors else None
+    # Share of the current window's authors who were also active in the 90
+    # days before.  Unknown (None) when the sample never reached the prior
+    # window and it could not be fetched; scoring treats that as neutral.
+    # Nobody active now means nobody was retained, not an unknown.
+    if not current_authors:
+        retention: Optional[float] = 0.0
+    elif not prior_known:
+        retention = None
+    else:
+        retention = len(current_authors & authors_prior) / float(len(current_authors))
 
     # ---- releases ---------------------------------------------------------
     releases = _release_list(repo)
