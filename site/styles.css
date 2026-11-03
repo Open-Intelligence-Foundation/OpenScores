@@ -234,16 +234,52 @@ details.section > summary .sum { color: var(--ink-2); font-weight: 500; font-var
   col.c-main { width: 150px; }
   .score.overall { min-width: 120px; }
 }
+/* Phones: the tables become card lists. Each row is a grid or flex box, so
+   the project name gets the full width and the figures sit around it,
+   instead of eleven columns fighting over 340px. Column headers are hidden;
+   the sort select does that job. */
 @media (max-width: 720px) {
   .brand p { display: none; }
-  col.c-rank { width: 58px; }
-  col.c-main { width: 108px; }
-  col.c-stars { width: 68px; }
-  tbody td, thead th { padding-left: 8px; padding-right: 8px; }
-  .score.overall { grid-template-columns: 44px 1fr; min-width: 0; }
-  .score.overall .v { font-size: 19px; }
-  .score.overall .d { display: none; }
+  .topbar { position: relative; padding-top: 14px; gap: 10px 16px; }
+  .nav { width: 100%; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; }
+  .nav a { white-space: nowrap; }
+  .nav .icon-btn { position: absolute; right: 0; top: 14px; }
+  .tiles { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tile { padding: 10px 12px; }
+  .tile .value { font-size: 22px; }
+  .controls select { flex: 1 1 40%; }
+  .controls .count { flex-basis: 100%; margin-left: 0; text-align: right; }
+
+  table, tbody { display: block; }
+  colgroup, thead { display: none; }
+  tbody tr { border-bottom: 1px solid var(--grid); }
+  tbody tr:last-child { border-bottom: none; }
+  tbody td { display: block; padding: 0; border: 0; overflow: visible; }
+  td.proj { min-width: 0; overflow: hidden; }
+  .proj .desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .proj .chip { display: none; }
+  td.rank { font-size: 13px; text-align: left; }
+  td.num { white-space: nowrap; }
+
+  /* leaderboard card: rank | project name + description | stars
+                             | overall score with its meter and delta  */
+  tbody tr {
+    display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; grid-template-areas: "rank proj stars" "rank main main";
+    gap: 6px 10px; align-items: start; padding: 12px 14px;
+  }
+  td.rank { grid-area: rank; padding-top: 2px; }
+  td.proj { grid-area: proj; }
+  td.main { grid-area: main; }
+  td.num { grid-area: stars; text-align: right; }
+  td.num > span:first-child::after { content: " stars"; color: var(--muted); font-size: 12px; font-weight: 400; }
+  .score.overall { grid-template-columns: 52px 1fr; min-width: 0; }
+  td.sub, td.cat-col { display: none; }
+
+  .catalog-layout .cats { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+  .catalog-layout .cat-btn { flex: 0 0 auto; }
+  .more-wrap, .pager { padding: 10px; }
+  .pager .page-info { flex-basis: 100%; order: 1; min-width: 0; }   /* buttons in one row, the page text under them */
+
   .row { grid-template-columns: 1fr 44px 52px; }
   .row .meter { grid-column: 1 / -1; }
   .drawer { padding: 14px 16px 40px; }
@@ -252,6 +288,7 @@ details.section > summary .sum { color: var(--ink-2); font-weight: 500; font-var
 
 /* catalog page */
 .catalog-layout { display: grid; grid-template-columns: 240px 1fr; gap: 14px; align-items: start; }
+.catalog-layout > * { min-width: 0; }   /* the wide table scrolls inside its wrap instead of stretching the page */
 .cats { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
 .cat-btn { display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left; background: none; border: 0; border-radius: 8px; padding: 7px 10px; cursor: pointer; color: var(--ink-2); font-size: 13px; }
 .cat-btn:hover { background: var(--surface-2); color: var(--ink); }
@@ -278,4 +315,21 @@ table.catalog thead th:not([data-sort]) { cursor: default; }
 @media (max-width: 900px) {
   .catalog-layout { grid-template-columns: 1fr; }
   .cats { position: static; flex-direction: row; flex-wrap: wrap; }
+  /* catalog card: rank | project, then a wrapping line of its figures. Used
+     as soon as the sidebar collapses, since the eight-column table needs
+     900px and would otherwise scroll sideways. */
+  table.catalog, table.catalog tbody { display: block; }
+  .table-wrap table.catalog { min-width: 0; }
+  table.catalog colgroup, table.catalog thead { display: none; }
+  table.catalog tbody tr {
+    display: flex; flex-wrap: wrap; gap: 2px 12px; position: relative; padding: 12px 14px 12px 46px; border-bottom: 1px solid var(--grid);
+  }
+  table.catalog tbody tr:last-child { border-bottom: none; }
+  table.catalog tbody td { display: block; padding: 0; border: 0; overflow: visible; }
+  table.catalog td.rank { position: absolute; left: 14px; top: 14px; font-size: 13px; text-align: left; }
+  table.catalog td.proj { flex: 1 0 100%; min-width: 0; overflow: hidden; margin-bottom: 2px; }
+  table.catalog .proj .desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  table.catalog td:not(.proj):not(.rank) { flex: 0 0 auto; font-size: 12px; color: var(--ink-2); text-align: left; white-space: nowrap; }
+  table.catalog td.stars::after { content: " stars"; color: var(--muted); }
+  table.catalog td.forks::after { content: " forks"; color: var(--muted); }
 }

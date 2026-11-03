@@ -108,8 +108,8 @@
         '<td class="proj"><div class="name"><a href="https://github.com/' + esc(p.n) + '" target="_blank" rel="noopener"><span class="owner">' + esc(parts[0]) + " / </span>" + esc(parts[1]) + "</a>" + flag + "</div>" +
         '<div class="desc" title="' + esc(p.d) + '">' + esc(p.d) + "</div>" + chips + "</td>" +
         '<td class="cat">' + esc(p.c) + "</td>" +
-        '<td class="num" title="' + fmtInt(p.s) + '">' + fmtCompact(p.s) + "</td>" +
-        '<td class="num">' + fmtCompact(p.f) + "</td>" +
+        '<td class="num stars" title="' + fmtInt(p.s) + '">' + fmtCompact(p.s) + "</td>" +
+        '<td class="num forks">' + fmtCompact(p.f) + "</td>" +
         "<td>" + esc(p.l || "—") + "</td>" +
         '<td class="cat">' + esc(p.lic || "none") + "</td>" +
         '<td class="cat" title="' + esc(p.p) + '">' + ago(p.p) + "</td></tr>";
