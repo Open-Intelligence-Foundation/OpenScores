@@ -338,10 +338,20 @@ SUSTAINABILITY_WEIGHTS = {
 OVERALL_WEIGHTS = {"maturity": 0.25, "health": 0.25, "popularity": 0.25,
                    "sustainability": 0.15, "risk": 0.10}
 
-# Bot accounts to ignore when counting humans.
+# Bot accounts to ignore when counting humans.  Logins ending in "[bot]" or
+# "-bot" are bots without being listed; this list is for the rest, including
+# automations that run as ordinary user accounts (UltralyticsAssistant).
 BOT_LOGINS = {
     "dependabot", "dependabot[bot]", "github-actions", "github-actions[bot]",
     "renovate", "renovate[bot]", "pre-commit-ci", "pre-commit-ci[bot]",
     "allcontributors[bot]", "codecov", "codecov[bot]", "copilot", "web-flow",
     "mergify[bot]", "stale[bot]", "imgbot[bot]", "snyk-bot", "greenkeeper[bot]",
+    "ultralyticsassistant", "codecov-commenter", "coderabbitai", "dosubot",
+    "sweep-ai", "copilot-pull-request-reviewer", "copilot-swe-agent",
+    "github-advanced-security", "google-labs-jules", "netlify", "vercel",
+    "sonarqubecloud", "cla-assistant", "gitguardian", "deepsource-autofix",
 }
+
+# GitHub App slugs whose pull requests are excluded from the PR activity
+# counts via the search qualifier `-author:app/<slug>` (collect.fetch_counts).
+BOT_APP_SLUGS = ("dependabot", "renovate", "github-actions")

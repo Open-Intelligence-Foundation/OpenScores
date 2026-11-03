@@ -83,19 +83,22 @@ REPO_CORE_FIELDS = [
         }
       }
     }"""),
+    # Actor `__typename` tells GitHub Apps (Bot) from users, and three comments
+    # per item leave a human reply to measure once an auto-responder's comment
+    # is dropped.  See collect._median_response_hours.
     ("recentIssues", """recentIssues: issues(first: 40, orderBy: {field: CREATED_AT, direction: DESC}) {
       nodes {
         createdAt closedAt
-        author { login }
-        comments(first: 3) { nodes { createdAt author { login } } }
+        author { __typename login }
+        comments(first: 3) { nodes { createdAt author { __typename login } } }
       }
     }"""),
     ("recentPRs", """recentPRs: pullRequests(first: 40, orderBy: {field: CREATED_AT, direction: DESC}) {
       nodes {
         createdAt mergedAt closedAt
-        author { login }
-        reviews(first: 1) { nodes { createdAt author { login } } }
-        comments(first: 2) { nodes { createdAt author { login } } }
+        author { __typename login }
+        reviews(first: 1) { nodes { createdAt author { __typename login } } }
+        comments(first: 3) { nodes { createdAt author { __typename login } } }
       }
     }"""),
     ("stargazers", "stargazers(first: 100, orderBy: {field: STARRED_AT, direction: DESC}) { edges { starredAt } }"),

@@ -360,3 +360,99 @@ def test_issue_templates_are_read_from_the_file_tree():
     repo["dotgithub"] = None
     repo["docsDir"] = {"entries": [{"name": "issue_template.md", "type": "blob"}]}
     assert has_templates(repo)
+
+
+# ---------------------------------------------------------------- bot handling
+def _issue(days_ago, author, replies=(), closed_days_ago=None):
+    """An issue node; replies are (seconds after creation, author dict)."""
+    created = NOW - timedelta(days=days_ago)
+    return {
+        "createdAt": iso(created),
+        "closedAt": iso(NOW - timedelta(days=closed_days_ago)) if closed_days_ago is not None else None,
+        "author": author,
+        "comments": {"nodes": [{"createdAt": iso(created + timedelta(seconds=secs)), "author": who}
+                               for secs, who in replies]},
+    }
+
+
+def _user(login):
+    return {"__typename": "User", "login": login}
+
+
+def test_bot_typed_actor_is_not_a_responder():
+    # A GitHub App (Bot actor) with an innocuous login answers in 10 s, a human after 5 h.
+    items = [_issue(10, _user("reporter"), [(10, {"__typename": "Bot", "login": "helpful-helper"}),
+                                           (5 * 3600, _user("alice"))])]
+    assert abs(collect._median_response_hours(items, NOW, "issue") - 5) < 1e-9
+
+
+def test_automation_login_patterns():
+    for login in ("UltralyticsAssistant", "acme-ci", "ci_runner", "release-automation", "AcmeBot", "bot-helper"):
+        assert collect._looks_automated(login), login
+    for login in ("marci", "ricci", "davinci", "alice", "robotics-fan", "abbott"):
+        assert not collect._looks_automated(login), login
+    items = [_issue(10, _user("reporter"), [(20, _user("acmeassistant")), (3 * 3600, _user("alice"))])]
+    assert abs(collect._median_response_hours(items, NOW, "issue") - 3) < 1e-9
+
+
+def test_fast_responder_is_dropped_per_repository():
+    # "helper" answers three issues within a minute; humans follow two hours later.
+    fast = [_issue(10 + i, _user("reporter%d" % i), [(15 + i, _user("helper")), (2 * 3600, _user("alice"))])
+            for i in range(3)]
+    assert abs(collect._median_response_hours(fast, NOW, "issue") - 2) < 1e-9
+    # With only two sightings the same login still counts as a human.
+    assert collect._median_response_hours(fast[:2], NOW, "issue") < 0.01
+    # A login that is quick once but usually slow is a human.
+    mixed = [_issue(10, _user("r1"), [(5, _user("alice"))]),
+             _issue(11, _user("r2"), [(3600, _user("alice"))]),
+             _issue(12, _user("r3"), [(7200, _user("alice"))])]
+    assert abs(collect._median_response_hours(mixed, NOW, "issue") - 1) < 1e-9
+
+
+def test_fast_responder_dropped_falls_back_to_close_or_silence():
+    # Only the auto-responder ever answered: the close event or the item's age is used.
+    items = [_issue(10 + i, _user("reporter%d" % i), [(5, _user("helper"))]) for i in range(3)]
+    items[0]["closedAt"] = iso(NOW - timedelta(days=9))
+    hours = collect._median_response_hours(items, NOW, "issue")
+    assert hours is not None and hours > 24 * 9 - 1e-6   # 24 h to close, and two items aged 11 and 12 days
+
+
+def test_external_engagement_sample_skips_bot_typed_authors():
+    counts = {"issuesOpened": 30, "issuesClosed": 36, "prsOpened": 50, "prsMerged": 40,
+              "prsClosed": 45, "staleIssues": 4, "breaking": 1}
+    commits = fake_repo()["defaultBranchRef"]["target"]["history"]["nodes"]
+    baseline = collect.build_metrics(fake_repo(), commits, counts, 120, 0.9, NOW)["external_engagement_90d"]
+    # Twenty issues opened by an App with an ordinary-looking login must not move the external share.
+    repo = fake_repo()
+    repo["recentIssues"]["nodes"] += [_issue(30 + i, {"__typename": "Bot", "login": "nightly-sync"}, closed_days_ago=29)
+                                      for i in range(20)]
+    as_bot = collect.build_metrics(repo, commits, counts, 120, 0.9, NOW)["external_engagement_90d"]
+    assert as_bot == baseline
+    for node in repo["recentIssues"]["nodes"]:
+        if node["author"]["login"] == "nightly-sync":
+            node["author"]["__typename"] = "User"
+    as_user = collect.build_metrics(repo, commits, counts, 120, 0.9, NOW)["external_engagement_90d"]
+    assert as_user > baseline
+
+
+def test_fetch_counts_excludes_well_known_bot_apps_from_pr_counts():
+    class CountsClient:
+        def graphql(self, query, variables=None):
+            self.variables = variables
+            return {k: {"issueCount": 1} for k in variables}
+
+    client = CountsClient()
+    collect.fetch_counts(client, "acme/ai-tool", NOW)
+    v = client.variables
+    for key in ("prsOpened", "prsMerged", "prsClosed"):
+        assert v[key].startswith("repo:acme/ai-tool is:pr")
+        for slug in ("dependabot", "renovate", "github-actions"):
+            assert "-author:app/%s" % slug in v[key], key
+    for key in ("issuesOpened", "issuesClosed", "staleIssues", "breaking"):
+        assert "-author:" not in v[key], key
+
+
+def test_explicit_bot_logins_cover_user_account_automations():
+    assert collect._is_bot("UltralyticsAssistant")
+    assert collect._is_bot("dosubot[bot]") and collect._is_bot("coderabbitai")
+    assert not collect._is_bot("alice")

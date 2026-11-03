@@ -75,6 +75,35 @@ def _is_bot(login: Optional[str]) -> bool:
     return low in config.BOT_LOGINS or low.endswith("[bot]") or low.endswith("-bot")
 
 
+def _is_bot_actor(actor: Optional[dict]) -> bool:
+    """An issue, PR, comment or review author node.  GitHub Apps come back as
+    the `Bot` type (hence `__typename` in the queries); the rest is the login
+    list, which also catches automations running as ordinary user accounts."""
+    if not actor:
+        return False
+    return actor.get("__typename") == "Bot" or _is_bot(actor.get("login"))
+
+
+# Logins that name an automation without GitHub's [bot] suffix: assistant,
+# bot, automation or ci as a whole word (acme-ci, ci_runner, bot-helper) or,
+# for the three longer words, as a bare suffix (ultralyticsassistant).  "ci"
+# is not a suffix because two letters end too many ordinary names (Marci,
+# Ricci, Vinci).
+_AUTOMATION_WORD = re.compile(r"(?:^|[^a-z0-9])(?:assistant|bot|automation|ci)(?:[^a-z0-9]|$)")
+_AUTOMATION_SUFFIX = re.compile(r"(?:assistant|bot|automation)$")
+
+# A login that answers within this many seconds of the item being opened, in
+# at least this many of the sampled items, is an auto-responder whatever its
+# account type (UltralyticsAssistant answers in 20 seconds from a user account).
+FAST_RESPONDER_SECONDS = 60
+FAST_RESPONDER_MIN_ITEMS = 3
+
+
+def _looks_automated(login: str) -> bool:
+    low = login.lower()
+    return bool(_AUTOMATION_WORD.search(low) or _AUTOMATION_SUFFIX.search(low))
+
+
 def author_key(author: Optional[dict]) -> Optional[str]:
     """Stable identity for a commit author: login, else email, else name."""
     if not author:
@@ -152,27 +181,55 @@ def _major(tag: str) -> Optional[int]:
 def _median_response_hours(items: List[dict], now: datetime, kind: str) -> Optional[float]:
     """Median hours to first response for recent issues or PRs.
 
-    A response is the first comment/review by someone other than the author
-    (bots excluded), or the close/merge event. Items younger than 7 days with
-    no response are ignored (not yet observable); older unanswered items count
-    as their current age, so silence is penalised.
+    A response is the first comment/review by someone other than the author,
+    or the close/merge event. Items younger than 7 days with no response are
+    ignored (not yet observable); older unanswered items count as their
+    current age, so silence is penalised.
+
+    Bots are not responses: GitHub Apps (`Bot` actors), listed bot logins,
+    logins that name an automation (see _looks_automated), and, per
+    repository, any login whose median delay as first responder is under
+    FAST_RESPONDER_SECONDS across at least FAST_RESPONDER_MIN_ITEMS items.
+    The next human comment is used instead, which is why the queries fetch
+    three comments per item.
     """
-    hours: List[float] = []
-    for item in items:
+    created_at: Dict[int, datetime] = {}
+    replies: Dict[int, List[Tuple[datetime, str]]] = {}
+    first_delays: Dict[str, List[float]] = {}
+    for i, item in enumerate(items):
         created = parse_dt(item.get("createdAt"))
         if not created:
             continue
         author = ((item.get("author") or {}).get("login") or "").lower()
-        candidates: List[datetime] = []
         responders = list((item.get("comments") or {}).get("nodes") or [])
         if kind == "pr":
             responders += list((item.get("reviews") or {}).get("nodes") or [])
+        found: List[Tuple[datetime, str]] = []
         for c in responders:
-            login = ((c.get("author") or {}).get("login") or "").lower()
-            if login and login != author and not _is_bot(login):
-                dt = parse_dt(c.get("createdAt"))
-                if dt:
-                    candidates.append(dt)
+            actor = c.get("author") or {}
+            login = (actor.get("login") or "").lower()
+            dt = parse_dt(c.get("createdAt"))
+            if not login or not dt or login == author:
+                continue
+            if _is_bot_actor(actor) or _looks_automated(login):
+                continue
+            found.append((dt, login))
+        found.sort()
+        created_at[i] = created
+        replies[i] = found
+        if found:
+            first_dt, first_login = found[0]
+            first_delays.setdefault(first_login, []).append((first_dt - created).total_seconds())
+
+    fast_responders = {
+        login for login, delays in first_delays.items()
+        if len(delays) >= FAST_RESPONDER_MIN_ITEMS and statistics.median(delays) < FAST_RESPONDER_SECONDS
+    }
+
+    hours: List[float] = []
+    for i, created in created_at.items():
+        item = items[i]
+        candidates = [dt for dt, login in replies[i] if login not in fast_responders]
         for key in ("closedAt", "mergedAt"):
             dt = parse_dt(item.get(key))
             if dt:
@@ -241,12 +298,19 @@ def fetch_counts(client: GitHubClient, full_name: str, now: datetime) -> Dict[st
     d180 = (now - timedelta(days=config.STALE_ISSUE_DAYS)).strftime("%Y-%m-%d")
     d365 = (now - timedelta(days=config.RELEASE_WINDOW_DAYS)).strftime("%Y-%m-%d")
     base = "repo:%s " % full_name
+    # Pull requests opened by well-known automation apps are left out of the
+    # PR activity counts (opened, merged and closed together, so the merge
+    # rate stays a ratio of like with like).  GitHub search can exclude a
+    # GitHub App by `-author:app/<slug>`, and nothing more general: an
+    # automation that runs as an ordinary user account, or an app we do not
+    # name in config.BOT_APP_SLUGS, still counts here.
+    human_prs = " " + " ".join("-author:app/%s" % slug for slug in config.BOT_APP_SLUGS)
     variables = {
         "issuesOpened": base + "is:issue created:>=%s" % d90,
         "issuesClosed": base + "is:issue is:closed closed:>=%s" % d90,
-        "prsOpened": base + "is:pr created:>=%s" % d90,
-        "prsMerged": base + "is:pr is:merged merged:>=%s" % d90,
-        "prsClosed": base + "is:pr is:closed closed:>=%s" % d90,
+        "prsOpened": base + "is:pr created:>=%s" % d90 + human_prs,
+        "prsMerged": base + "is:pr is:merged merged:>=%s" % d90 + human_prs,
+        "prsClosed": base + "is:pr is:closed closed:>=%s" % d90 + human_prs,
         "staleIssues": base + "is:issue is:open updated:<%s" % d180,
         "breaking": base + "is:pr is:merged merged:>=%s breaking in:title" % d365,
     }
@@ -543,8 +607,9 @@ def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],
     recent_issues = (repo.get("recentIssues") or {}).get("nodes") or []
     recent_prs = (repo.get("recentPRs") or {}).get("nodes") or []
     maintainers = {k[1:] for k in counts_180 if k.startswith("@")}
-    sample = [((i.get("author") or {}).get("login") or "").lower() for i in recent_issues + recent_prs]
-    sample = [s for s in sample if s and not _is_bot(s)]
+    authors = [(i.get("author") or {}) for i in recent_issues + recent_prs]
+    sample = [(a.get("login") or "").lower() for a in authors if not _is_bot_actor(a)]
+    sample = [s for s in sample if s]
     external_fraction = (sum(1 for s in sample if s not in maintainers) / float(len(sample))) if sample else 0.5
     external_engagement = int(round((counts["issuesOpened"] + counts["prsOpened"]) * external_fraction))
 
