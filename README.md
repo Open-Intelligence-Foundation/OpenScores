@@ -84,7 +84,7 @@ is the best primary token: it reads everything the collector asks for. A
 fine-grained token also works, with two caveats the collector handles on its
 own and logs once per run: fine-grained tokens are refused GitHub Sponsors
 data (the sponsorship signal then comes from funding links only) and the
-stargazer timeline in GraphQL. GitHub has since stopped serving the stargazer timeline altogether, so stars gained in the window are derived from the daily star counts in `site/data/history.json` (exact after 90 days of history, extrapolated and flagged as estimated before that).
+stargazer timeline in GraphQL. GitHub has since stopped serving the stargazer timeline altogether and replaced it with a star history endpoint (`/repos/{owner}/{repo}/stargazers/history`) that returns exact daily star counts back to a repository's creation; stars gained in the window come from there. If that endpoint is unavailable, the figure falls back to the daily star counts in `site/data/history.json` (exact after 90 days of history, extrapolated and flagged as estimated before that).
 
 Some organizations refuse one kind of token outright (SAML single sign-on, or
 an organization policy against classic tokens); GitHub then answers every
@@ -226,7 +226,8 @@ A full collection costs about 10 requests and 7 GraphQL points per repository
 has 5,000 requests per hour for REST and 5,000 points per hour for GraphQL,
 counted separately, so one hour buys at most about 475 full collections even
 if every request landed in the same bucket. The light refresh is almost free:
-2,000 repositories cost 40 GraphQL requests.
+2,000 repositories cost 40 GraphQL requests, plus one REST request per
+repository to read exact 90-day star growth from the star history endpoint.
 
 The schedule follows from that. Six runs a day with `FULL_REFRESH_DAYS=1`
 means each run fully recollects about 335 repositories (~3,500 requests and

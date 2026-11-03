@@ -527,3 +527,42 @@ def test_explicit_bot_logins_cover_user_account_automations():
     assert collect._is_bot("UltralyticsAssistant")
     assert collect._is_bot("dosubot[bot]") and collect._is_bot("coderabbitai")
     assert not collect._is_bot("alice")
+
+
+def _weeks(now, per_day):
+    """Weekly rows as the star history endpoint returns them, newest first,
+    covering the 30 weeks up to ``now`` with ``per_day`` stars on every day."""
+    sunday = (now - timedelta(days=(now.weekday() + 1) % 7)).replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = []
+    for w in range(30):
+        start = sunday - timedelta(days=7 * w)
+        days = [per_day if start + timedelta(days=i) <= now else 0 for i in range(7)]
+        rows.append({"week": int(start.timestamp()), "total": sum(days), "days": days})
+    return rows
+
+
+def test_stars_in_window_sums_the_daily_counts_inside_the_window():
+    rows = _weeks(NOW, 3)
+    assert collect.stars_in_window(rows, NOW, 90) == 3 * 91          # 90 full days plus today
+    assert collect.stars_in_window(rows, NOW, 7) == 3 * 8
+    assert collect.stars_in_window([], NOW, 90) is None
+    assert collect.stars_in_window([{"week": "bad", "days": [1]}], NOW, 90) is None
+    assert collect.stars_in_window("nope", NOW, 90) is None
+
+
+def test_collect_repo_prefers_the_star_history_endpoint():
+    client = ScriptedClient(_core_only(fake_repo()), forbid_stargazers=True,
+                            rest_pages={"/repos/acme/ai-tool/stargazers/history": FakeResponse(_weeks(NOW, 2)),
+                                        "/repos/acme/ai-tool/stargazers": FakeResponse([])})
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert metrics["stars_90d"] == 2 * 91 and metrics["stars_90d_estimated"] is False
+    assert metrics["stars_90d_exact"] is True
+    assert "rest:/repos/acme/ai-tool/stargazers/history" in client.seen
+    assert "rest:/repos/acme/ai-tool/stargazers" not in client.seen       # the old fallback is skipped
+
+
+def test_collect_repo_falls_back_when_the_history_endpoint_is_missing():
+    client = ScriptedClient(_core_only(fake_repo()))                       # GraphQL sample, no REST history
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert metrics["stars_90d_exact"] is False
+    assert metrics["stars_90d"] == 92 and metrics["stars_90d_estimated"] is True

@@ -14,6 +14,9 @@ class FakeGitHubClient:
         self.requests_made = 0
         self.graphql_points_used = 0
 
+    def rest(self, path, params=None, allow_404=True, headers=None):
+        return None
+
 
 def metrics_for(name):
     repo = fake_repo()
@@ -29,6 +32,8 @@ def test_two_runs_use_cache_and_light_refresh(tmp_path, monkeypatch):
     collected, light_calls = [], []
     monkeypatch.setattr(pipeline, "GitHubClient", FakeGitHubClient)
     monkeypatch.setattr(pipeline, "collect_repo", lambda client, name, now: (collected.append(name), metrics_for(name))[1])
+    monkeypatch.setattr(pipeline, "fetch_star_history_rest",
+                        lambda client, name, now, window_days=None: 4321 if name == "a/one" else None)
     monkeypatch.setattr(pipeline, "fetch_light", lambda client, names: (light_calls.append(list(names)),
                                                                         {n.lower(): {"stargazerCount": 999} for n in names})[1])
     monkeypatch.setattr(pipeline, "catalog_candidates",
@@ -61,6 +66,9 @@ def test_two_runs_use_cache_and_light_refresh(tmp_path, monkeypatch):
     by_name = {p["full_name"]: p for p in board["projects"]}
     assert by_name["a/one"]["metrics"]["from_cache"] is True
     assert by_name["a/one"]["metrics"]["stars"] == 999       # light refresh applied
+    # cached repositories get exact star growth from the star history endpoint on every run
+    assert by_name["a/one"]["metrics"]["stars_90d"] == 4321 and by_name["a/one"]["metrics"]["stars_90d_exact"] is True
+    assert by_name["a/two"]["metrics"]["stars_90d_exact"] is False   # endpoint answered nothing: cached figure kept
     assert "from_cache" not in by_name["a/three"]["metrics"]
     assert by_name["a/one"]["topics"] and "llm" in by_name["a/one"]["topics"]   # catalog topics merged
     assert [p["rank"] for p in board["projects"]] == [1, 2, 3]
@@ -237,3 +245,10 @@ def test_prune_history_drops_points_before_the_first_real_collection():
     assert list(pruned) == ["a/one"]
     assert [pt["d"] for pt in pruned["a/one"]] == ["2026-10-29"]
     assert pipeline.prune_history(history, "") == history
+
+
+def test_apply_star_history_keeps_an_exact_figure_from_the_star_history_endpoint():
+    history = {"a/one": _series([("2026-01-01", 100), ("2026-05-01", 400)])}
+    metrics = {"full_name": "a/one", "stars": 500, "stars_90d": 123, "stars_90d_estimated": False, "stars_90d_exact": True}
+    out = pipeline.apply_star_history(dict(metrics), history, "2026-05-25")
+    assert (out["stars_90d"], out["stars_90d_estimated"]) == (123, False)

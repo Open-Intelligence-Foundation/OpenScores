@@ -475,6 +475,58 @@ def fetch_recent_stars_rest(client: GitHubClient, full_name: str) -> Optional[Li
     return dates
 
 
+def stars_in_window(weeks: List[dict], now: datetime, window_days: int) -> Optional[int]:
+    """Stars gained in the last ``window_days`` days from the star history
+    endpoint's weekly rows (``week`` epoch of the Sunday, ``days`` Sunday first)."""
+    if not isinstance(weeks, list):
+        return None
+    cutoff = (now - timedelta(days=window_days)).date()
+    today = now.date()
+    total, seen = 0, False
+    for row in weeks:
+        if not isinstance(row, dict) or not isinstance(row.get("days"), list):
+            continue
+        try:
+            start = datetime.fromtimestamp(int(row["week"]), timezone.utc).date()
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        seen = True
+        for i, n in enumerate(row["days"]):
+            day = start + timedelta(days=i)
+            if cutoff <= day <= today:
+                total += int(n or 0)
+    return total if seen else None
+
+
+def fetch_star_history_rest(client: GitHubClient, full_name: str, now: datetime,
+                            window_days: Optional[int] = None) -> Optional[int]:
+    """Exact stars gained in the window, from GitHub's star history endpoint
+    (weekly rows with daily counts, newest first, back to the repository's
+    creation).  One page of 30 weeks covers 210 days; more are read only when
+    the window is longer.  None when the endpoint is unavailable."""
+    window = config.WINDOW_DAYS if window_days is None else window_days
+    path = "/repos/%s/stargazers/history" % full_name
+    cutoff = (now - timedelta(days=window)).date()
+    rows: List[dict] = []
+    for page in range(1, 6):
+        resp = client.rest(path, {"per_page": 30, "page": page})
+        if resp is None:
+            return None if not rows else stars_in_window(rows, now, window)
+        try:
+            body = resp.json()
+        except ValueError:
+            return None
+        if not isinstance(body, list):
+            return None
+        rows.extend(r for r in body if isinstance(r, dict))
+        if not body or 'rel="next"' not in (resp.headers.get("Link") or ""):
+            break
+        oldest = min((r.get("week") or 0) for r in body if isinstance(r, dict))
+        if datetime.fromtimestamp(int(oldest), timezone.utc).date() < cutoff:
+            break
+    return stars_in_window(rows, now, window)
+
+
 def fetch_recent_forks_rest(client: GitHubClient, full_name: str) -> Optional[List[str]]:
     data = client.rest_json("/repos/%s/forks" % full_name, {"sort": "newest", "per_page": 100})
     if data is None:
@@ -516,9 +568,14 @@ def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] =
         return None
     full_name = repo["nameWithOwner"]  # canonical casing / renames
 
+    # GitHub's star history endpoint gives exact daily star counts back to the
+    # repository's creation; the sampled stargazer timeline, which GitHub no
+    # longer serves to most tokens, is only a fallback.
+    repo["starsInWindow"] = fetch_star_history_rest(client, full_name, now)
+
     # Fields dropped from the GraphQL query because the token may not read them
     # are backfilled over REST where an equivalent exists.
-    if "stargazers" not in repo:
+    if "stargazers" not in repo and repo["starsInWindow"] is None:
         dates = fetch_recent_stars_rest(client, full_name)
         if dates is not None:
             repo["stargazers"] = {"edges": [{"starredAt": d} for d in dates]}
@@ -651,7 +708,10 @@ def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],
     license_info = repo.get("licenseInfo") or {}
 
     # ---- popularity -------------------------------------------------------
-    if repo.get("stargazers") is None:
+    stars_exact = repo.get("starsInWindow") is not None
+    if stars_exact:
+        stars_90d, stars_est = int(repo["starsInWindow"]), False
+    elif repo.get("stargazers") is None:
         stars_90d, stars_est = None, None  # timeline unavailable to this token
     else:
         star_dates = [parse_dt(e.get("starredAt")) for e in (repo.get("stargazers") or {}).get("edges") or []]
@@ -718,7 +778,7 @@ def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],
         "active_contributors_90d": active_contributors_90d,
         # popularity inputs
         "stars": int(repo.get("stargazerCount") or 0),
-        "stars_90d": stars_90d, "stars_90d_estimated": stars_est,
+        "stars_90d": stars_90d, "stars_90d_estimated": stars_est, "stars_90d_exact": stars_exact,
         "forks": int(repo.get("forkCount") or 0),
         "forks_90d": forks_90d, "forks_90d_estimated": forks_est,
         "watchers": int((repo.get("watchers") or {}).get("totalCount") or 0),

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from . import __version__, config
-from .collect import RepositoryForbidden, collect_repo
+from .collect import RepositoryForbidden, collect_repo, fetch_star_history_rest
 from .discover import (AI_WORDS, WEAK_AI_WORDS, discover, effective_license, license_allowed, load_category_overrides,
                        load_exclusions, select_repos)
 from .github import GitHubClient, GitHubError
@@ -133,9 +133,12 @@ def star_growth_from_history(series: list, stars_now: int, day: str,
 
 
 def apply_star_history(metrics: dict, history: Dict[str, list], day: str) -> dict:
-    """Fill stars_90d from the daily history. GitHub stopped serving the
-    stargazer timeline, so the sample collected with the repository is
-    normally empty; it is only kept while the history is too short to use."""
+    """Fill stars_90d from the daily history when the collector could not read
+    GitHub's star history endpoint.  An exact figure from that endpoint is
+    kept; the sampled stargazer timeline, which GitHub no longer serves, is
+    normally empty and is only kept while the history is too short to use."""
+    if metrics.get("stars_90d_exact"):
+        return metrics
     series = history.get(metrics["full_name"]) or []
     gained, estimated = star_growth_from_history(series, metrics.get("stars") or 0, day)
     if gained is None:
@@ -144,6 +147,28 @@ def apply_star_history(metrics: dict, history: Dict[str, list], day: str) -> dic
         return metrics
     metrics["stars_90d"], metrics["stars_90d_estimated"] = gained, estimated
     return metrics
+
+
+def refresh_star_growth(client_for, names: List[str], now: datetime) -> Dict[str, int]:
+    """Exact stars gained in the window for cached repositories, one REST call
+    each to GitHub's star history endpoint.  Repositories the endpoint does not
+    answer for are left out and keep their cached or history-derived figure."""
+    def one(name: str) -> Tuple[str, Optional[int]]:
+        try:
+            return name.lower(), fetch_star_history_rest(client_for(name), name, now)
+        except GitHubError as exc:
+            log.debug("star history unavailable for %s: %s", name, exc)
+            return name.lower(), None
+
+    out: Dict[str, int] = {}
+    if not names:
+        return out
+    with ThreadPoolExecutor(max_workers=max(1, config.WORKERS)) as pool:
+        for key, gained in pool.map(one, names):
+            if gained is not None:
+                out[key] = gained
+    log.info("exact star growth read for %d of %d cached repositories", len(out), len(names))
+    return out
 
 
 def previous_scores(history: Dict[str, list], full_name: str, day: str, days_back: int = 7) -> Optional[dict]:
@@ -324,12 +349,21 @@ def run(repos: Optional[List[str]] = None, max_repos: Optional[int] = None, dry_
         light = fetch_light(client, primary_names) if primary_names else {}
         if fallback_names:
             light.update(fetch_light(token_pool.fallback, fallback_names))
+        fallback_set = {n.lower() for n in fallback_names}
+
+        def client_for(name: str) -> GitHubClient:
+            return token_pool.fallback if token_pool.fallback and name.lower() in fallback_set else client
+
+        growth = refresh_star_growth(client_for, [n for n in reuse if n.lower() in cache], now)
         for name in reuse:
             entry = cache.get(name.lower())
             if not entry:
                 deferred.append(name)
                 continue
             metrics = apply_light(entry["metrics"], light.get(name.lower()), now)
+            gained = growth.get(name.lower())
+            if gained is not None:
+                metrics.update(stars_90d=gained, stars_90d_estimated=False, stars_90d_exact=True)
             entry["metrics"] = metrics
             projects.append(finish(dict(metrics)))
         log.info("refreshed %d cached repositories with %d light payloads (requests=%d, graphql points=%d)",
