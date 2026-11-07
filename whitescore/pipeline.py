@@ -214,11 +214,13 @@ def build_project(metrics: dict) -> dict:
         "topics": metrics["topics"],
         "category": metrics["category"],
         "license": metrics["license"],
+        "image": metrics.get("image"),
+        "image_source": metrics.get("image_source"),
         "scores": scores,
         "bands": bands,
         "metrics": {k: v for k, v in metrics.items()
                     if k not in ("name", "owner", "description", "url", "homepage", "language",
-                                 "topics", "category", "license", "full_name")},
+                                 "topics", "category", "license", "full_name", "image", "image_source")},
     }
 
 

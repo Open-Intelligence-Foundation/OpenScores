@@ -45,7 +45,7 @@ REPO_CORE_FIELDS = [
     licenseInfo { spdxId name key }
     primaryLanguage { name }
     repositoryTopics(first: 30) { nodes { topic { name } } }
-    owner { __typename login }"""),
+    owner { __typename login avatarUrl }"""),
     ("watchers", "watchers { totalCount }"),
     ("codeOfConduct", "codeOfConduct { key name }"),
     ("contributingGuidelines", "contributingGuidelines { url }"),

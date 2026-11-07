@@ -252,3 +252,12 @@ def test_apply_star_history_keeps_an_exact_figure_from_the_star_history_endpoint
     metrics = {"full_name": "a/one", "stars": 500, "stars_90d": 123, "stars_90d_estimated": False, "stars_90d_exact": True}
     out = pipeline.apply_star_history(dict(metrics), history, "2026-05-25")
     assert (out["stars_90d"], out["stars_90d_estimated"]) == (123, False)
+
+
+def test_build_project_carries_the_image_out_of_the_metrics():
+    m = metrics_for("a/one")
+    m["image"], m["image_source"] = "https://example.org/logo.png", "repo"
+    project = pipeline.build_project(m)
+    assert (project["image"], project["image_source"]) == ("https://example.org/logo.png", "repo")
+    assert "image" not in project["metrics"]
+    assert pipeline.build_project(metrics_for("a/two"))["image"] is None

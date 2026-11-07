@@ -28,7 +28,8 @@ def fake_repo():
         "licenseInfo": {"spdxId": "Apache-2.0", "name": "Apache License 2.0", "key": "apache-2.0"},
         "primaryLanguage": {"name": "Python"},
         "repositoryTopics": {"nodes": [{"topic": {"name": "llm-inference"}}, {"topic": {"name": "python"}}]},
-        "owner": {"__typename": "Organization", "login": "acme", "hasSponsorsListing": False},
+        "owner": {"__typename": "Organization", "login": "acme", "hasSponsorsListing": False,
+                  "avatarUrl": "https://avatars.githubusercontent.com/u/1?v=4"},
         "fundingLinks": [{"platform": "GITHUB", "url": "https://github.com/sponsors/acme"}],
         "codeOfConduct": {"key": "contributor_covenant", "name": "Contributor Covenant"},
         "contributingGuidelines": {"url": "https://github.com/acme/ai-tool/blob/main/CONTRIBUTING.md"},
@@ -566,3 +567,89 @@ def test_collect_repo_falls_back_when_the_history_endpoint_is_missing():
     metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
     assert metrics["stars_90d_exact"] is False
     assert metrics["stars_90d"] == 92 and metrics["stars_90d_estimated"] is True
+
+
+# ---------------------------------------------------------------- project image
+def test_image_candidates_prefer_a_repo_logo_then_the_readme_logo_then_the_org_avatar():
+    repo = fake_repo()
+    repo["root"]["entries"].append({"name": "Logo.svg", "type": "blob"})
+    repo["docsDir"] = {"entries": [{"name": "icon-dark.png", "type": "blob"}, {"name": "logo", "type": "tree"}]}
+    repo["readmeMd"] = {"text": (
+        "[![CI](https://github.com/acme/ai-tool/actions/workflows/ci.yml/badge.svg)](x) "
+        "![PyPI](https://img.shields.io/pypi/v/ai-tool)\n"
+        '<p align="center"><img src="./assets/ai-tool-logo.png" width="300" alt=""></p>\n'
+        "![screenshot](docs/screenshot.png)\n"
+        "![brand](https://github.com/acme/ai-tool/blob/main/art/logo-wide.png)\n"
+        "<img src=\"assets/logo white.svg\" alt=\"\">\n"
+        "## Providers\n\n![kimi](public/providers/kimi-logo.png) ![edge](https://cdn.example.org/browser-logos/edge_64x64.png)\n"
+        "![named](art/ai-tool-logo-dark.png)\n")}
+    assert collect.image_candidates(repo) == [
+        ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/Logo.svg", "repo"),
+        ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/assets/ai-tool-logo.png", "repo"),
+        ("https://raw.githubusercontent.com/acme/ai-tool/main/art/logo-wide.png", "repo"),
+        ("https://avatars.githubusercontent.com/u/1?v=4", "org"),
+        # variants drawn for dark backgrounds rank below the avatar, spaces are encoded,
+        # and below the first heading only a logo named after the project counts
+        ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/docs/icon-dark.png", "repo"),
+        ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/assets/logo%20white.svg", "repo"),
+        ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/art/ai-tool-logo-dark.png", "repo"),
+    ]
+
+
+def test_image_candidates_skip_badges_user_avatars_and_unsafe_paths():
+    repo = fake_repo()
+    repo["owner"] = {"__typename": "User", "login": "someone", "avatarUrl": "https://avatars.githubusercontent.com/u/2"}
+    repo["readmeMd"] = {"text": "![logo badge](https://img.shields.io/badge/logo-x-blue)\n"
+                                "<img alt=\"logo\" src=\"../../etc/logo.png\">\n"
+                                "<img alt=\"logo\" src=\"data:image/png;base64,AAAA\">\n"
+                                "<img alt=\"logo\" src=\"ftp://example.org/logo.png\">\n"}
+    assert collect.image_candidates(repo) == []
+
+
+def test_resolve_project_image_takes_the_first_candidate_that_is_really_an_image():
+    repo = fake_repo()
+    repo["root"]["entries"].append({"name": "logo.png", "type": "blob"})
+    probed = []
+    def probe(url):
+        probed.append(url)
+        return url.endswith("?v=4")                      # the logo file is gone; the avatar answers
+    assert collect.resolve_project_image(repo, "https://ai-tool.dev", probe=probe, fetch_text=lambda u: "") == \
+        ("https://avatars.githubusercontent.com/u/1?v=4", "org")
+    assert probed[0] == "https://raw.githubusercontent.com/acme/ai-tool/HEAD/logo.png"
+
+
+def test_resolve_project_image_falls_back_to_the_website_icon_then_to_nothing():
+    repo = fake_repo()
+    repo["owner"] = {"__typename": "User", "login": "someone"}
+    page = '<html><head><link rel="icon" href="/static/favicon-32.png" sizes="32x32">' \
+           '<link rel="apple-touch-icon" href="/static/touch.png"><link rel="stylesheet" href="/a.css"></head></html>'
+    fetched = []
+    def fetch_text(url):
+        fetched.append(url)
+        return page
+    ok = {"https://ai-tool.dev/static/touch.png"}
+    assert collect.resolve_project_image(repo, "https://ai-tool.dev", probe=lambda u: u in ok, fetch_text=fetch_text) == \
+        ("https://ai-tool.dev/static/touch.png", "website")
+    assert fetched == ["https://ai-tool.dev"]
+    # no declared icon that answers: /favicon.ico is tried
+    assert collect.site_icon("https://ai-tool.dev/", fetch_text=lambda u: "", probe=lambda u: u.endswith("/favicon.ico")) == \
+        "https://ai-tool.dev/favicon.ico"
+    # generic hosts are never used as a project's picture; nothing found means no image
+    assert collect.site_icon("https://github.com/acme/ai-tool", fetch_text=lambda u: page, probe=lambda u: True) is None
+    assert collect.resolve_project_image(repo, "https://ai-tool.dev", probe=lambda u: False, fetch_text=lambda u: page) == (None, None)
+
+
+def test_collect_repo_records_the_image_and_its_source(monkeypatch):
+    core = _core_only(fake_repo())
+    core["owner"]["avatarUrl"] = "https://avatars.githubusercontent.com/u/1?v=4"
+    client = ScriptedClient(core)
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert (metrics["image"], metrics["image_source"]) == (None, None)       # the suite has no network
+
+    class Resp:
+        url = ""
+        headers = {"Content-Type": "image/png"}
+        def close(self): pass
+    monkeypatch.setattr(collect, "_http_get", lambda url, stream=False: Resp() if "avatars" in url else None)
+    metrics = collect.collect_repo(client, "acme/ai-tool", NOW)
+    assert (metrics["image"], metrics["image_source"]) == ("https://avatars.githubusercontent.com/u/1?v=4", "org")

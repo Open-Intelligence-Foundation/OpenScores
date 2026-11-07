@@ -7,12 +7,16 @@ documented inline and the metric is marked as estimated where relevant.
 """
 from __future__ import annotations
 
+import html
 import logging
 import re
 import statistics
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+from urllib.parse import quote, urljoin, urlsplit
+
+import requests
 
 from . import config
 from .discover import categorize
@@ -36,6 +40,225 @@ EXAMPLE_DIRS = {"examples", "example", "samples", "sample", "demo", "demos", "no
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# ------------------------------------------------------------------ project image
+# A project's picture on the board, found in this order: a logo file or the
+# README's logo in the repository, the GitHub organisation's avatar, the
+# website's icon.  Every candidate is fetched once to make sure it is really an
+# image; a project with none stays without a picture.
+
+IMAGE_EXTS = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".gif", ".ico")
+LOGO_FILE_RE = re.compile(r"^(logo|icon|favicon)[^/]*\.(png|svg|jpe?g|webp)$", re.I)
+LOGO_WORD_RE = re.compile(r"logo|icon", re.I)
+DARK_VARIANT_RE = re.compile(r"white|dark", re.I)        # a glyph drawn for dark backgrounds
+README_HEAD_RE = re.compile(r"\n\s{0,3}#{2,6}\s|<h2\b", re.I)   # the first second-level heading
+README_IMG_RE = re.compile(r"!\[([^\]]*)\]\(\s*<?([^\s)>]+)>?[^)]*\)|<img\b[^>]*>", re.I)
+IMG_ATTR_RE = re.compile(r"""\b(src|alt)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+LINK_TAG_RE = re.compile(r"<link\b[^>]*>", re.I)
+TAG_ATTR_RE = re.compile(r"""\b(rel|href|sizes)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))""", re.I)
+BADGE_MARKERS = ("shields.io", "badge", "badgen.net", "codecov.io", "coveralls.io", "circleci.com", "travis-ci",
+                 "pepy.tech", "pypistats", "colab.research.google.com", "/actions/workflows/", "readthedocs.org/projects",
+                 "star-history", "contrib.rocks", "repobeats", "snyk.io", "codeclimate", "deepwiki", "discord.com/api",
+                 "img.youtube", "trendshift.io", "producthunt", "sourcegraph", "gitpod.io", "codespaces.new")
+GENERIC_SITE_HOSTS = ("github.com", "www.github.com", "pypi.org", "huggingface.co", "arxiv.org", "discord.gg",
+                      "discord.com", "twitter.com", "x.com", "youtube.com", "www.youtube.com", "medium.com",
+                      "colab.research.google.com", "npmjs.com", "www.npmjs.com", "crates.io", "t.me", "linkedin.com")
+IMAGE_HEADERS = {"User-Agent": "OpenScores collector (+https://openscores.io)", "Accept": "image/*,text/html;q=0.9,*/*;q=0.5"}
+IMAGE_TIMEOUT = 8
+_image_session = requests.Session()
+
+
+def _http_get(url: str, stream: bool = False) -> Optional[requests.Response]:
+    """A plain GET of a public URL; None on any failure.  Tests stub this."""
+    if urlsplit(url).scheme not in ("http", "https"):
+        return None
+    try:
+        resp = _image_session.get(url, headers=IMAGE_HEADERS, timeout=IMAGE_TIMEOUT, stream=stream, allow_redirects=True)
+    except (requests.RequestException, ValueError):
+        return None
+    return resp if resp.status_code == 200 else None
+
+
+def _url_is_image(url: str) -> bool:
+    resp = _http_get(url, stream=True)
+    if resp is None:
+        return False
+    try:
+        ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ctype.startswith("image/"):
+            return True
+        # some hosts serve a real picture as octet-stream; trust the extension then
+        path = urlsplit(resp.url or url).path.lower()
+        return ctype in ("application/octet-stream", "") and path.endswith(IMAGE_EXTS)
+    finally:
+        resp.close()
+
+
+def _fetch_text(url: str, limit: int = 300_000) -> str:
+    resp = _http_get(url, stream=True)
+    if resp is None:
+        return ""
+    try:
+        ctype = (resp.headers.get("Content-Type") or "").lower()
+        if "html" not in ctype and "xml" not in ctype and ctype:
+            return ""
+        chunks, size = [], 0
+        for chunk in resp.iter_content(chunk_size=65536):
+            chunks.append(chunk)
+            size += len(chunk)
+            if size >= limit:
+                break
+        return b"".join(chunks).decode("utf-8", "replace")
+    except (requests.RequestException, ValueError):
+        return ""
+    finally:
+        resp.close()
+
+
+def _attrs(tag: str, pattern) -> Dict[str, str]:
+    out = {}
+    for m in pattern.finditer(tag):
+        out[m.group(1).lower()] = html.unescape(m.group(3) if m.group(3) is not None
+                                                else m.group(4) if m.group(4) is not None else m.group(5) or "")
+    return out
+
+
+def _raw_github_url(full_name: str, src: str) -> Optional[str]:
+    """A README image reference as a fetchable URL: relative paths and
+    github.com blob links become raw.githubusercontent.com links."""
+    src = html.unescape(src.strip()).split("#")[0]
+    if not src or src.startswith("data:"):
+        return None
+    parts = urlsplit(src)
+    if parts.scheme in ("http", "https"):
+        host = parts.netloc.lower()
+        if host in ("github.com", "www.github.com"):
+            m = re.match(r"^/([^/]+)/([^/]+)/(?:blob|raw)/([^/]+)/(.+)$", parts.path)
+            if m:
+                return "https://raw.githubusercontent.com/%s/%s/%s/%s" % m.groups()
+            return "https://github.com" + parts.path if "/assets/" in parts.path else None
+        return src
+    if parts.scheme:
+        return None
+    path = re.sub(r"^(\./)+", "", parts.path).lstrip("/")
+    if not path or ".." in path.split("/"):
+        return None
+    return "https://raw.githubusercontent.com/%s/HEAD/%s" % (full_name, quote(path, safe="/%:@+,"))
+
+
+def _is_badge(src: str, alt: str) -> bool:
+    low = src.lower()
+    return any(marker in low for marker in BADGE_MARKERS) or "badge" in alt.lower()
+
+
+def readme_images(text: str) -> List[Tuple[str, str]]:
+    """(src, alt) of every image in a README, markdown and HTML alike, in order."""
+    out = []
+    for m in README_IMG_RE.finditer(text or ""):
+        if m.group(0).lower().startswith("<img"):
+            a = _attrs(m.group(0), IMG_ATTR_RE)
+            if a.get("src"):
+                out.append((a["src"], a.get("alt", "")))
+        else:
+            out.append((m.group(2), m.group(1) or ""))
+    return out
+
+
+def image_candidates(repo: dict) -> List[Tuple[str, str]]:
+    """Possible pictures for a repository, best first, as (url, source).
+    Sources are "repo" (a logo in the repository) and "org" (the GitHub
+    organisation's avatar); the website is tried separately, last."""
+    full_name = repo.get("nameWithOwner") or ""
+    found: List[Tuple[str, str]] = []
+    seen = set()
+
+    def add(url: Optional[str], source: str) -> None:
+        if url and url not in seen:
+            seen.add(url)
+            found.append((url, source))
+
+    # A logo file in the repository, then the README's logo.  The project's own
+    # logo sits at the top of the README, before the first second-level
+    # heading; logos named after the project count anywhere.  Further down,
+    # "logo" images are usually other products' (providers, browsers,
+    # sponsors).  A variant drawn for dark backgrounds would vanish on the
+    # board's light tile, so it ranks below the organisation's avatar.
+    plain, dark = [], []
+    for key, prefix in (("root", ""), ("dotgithub", ".github/"), ("docsDir", "docs/")):
+        for e in (repo.get(key) or {}).get("entries") or []:
+            if e.get("type") == "blob" and LOGO_FILE_RE.match(e.get("name") or ""):
+                url = "https://raw.githubusercontent.com/%s/HEAD/%s%s" % (full_name, prefix, quote(e["name"]))
+                (dark if DARK_VARIANT_RE.search(e["name"]) else plain).append(url)
+    readme = _readme_text(repo)
+    head_len = len(README_HEAD_RE.split(readme, 1)[0])
+    names = [n.lower() for n in full_name.split("/") if len(n) >= 3]
+    for m in README_IMG_RE.finditer(readme):
+        if m.group(0).lower().startswith("<img"):
+            a = _attrs(m.group(0), IMG_ATTR_RE)
+            src, alt = a.get("src", ""), a.get("alt", "")
+        else:
+            src, alt = m.group(2), m.group(1) or ""
+        if not src or _is_badge(src, alt):
+            continue
+        filename = urlsplit(src).path.rsplit("/", 1)[-1]
+        if not (LOGO_WORD_RE.search(filename) or LOGO_WORD_RE.search(alt)):
+            continue
+        named = any(n in filename.lower() for n in names)
+        if m.start() > head_len and not named:
+            continue
+        (dark if DARK_VARIANT_RE.search(filename) else plain).append(_raw_github_url(full_name, src))
+    for url in plain:
+        add(url, "repo")
+    owner = repo.get("owner") or {}
+    if owner.get("__typename") == "Organization" and owner.get("avatarUrl"):
+        add(owner["avatarUrl"], "org")
+    for url in dark:
+        add(url, "repo")
+    return found
+
+
+def site_icon(homepage: str, fetch_text: Callable[[str], str] = _fetch_text,
+              probe: Callable[[str], bool] = _url_is_image) -> Optional[str]:
+    """The website's icon: the largest <link rel=icon> it declares, else /favicon.ico."""
+    parts = urlsplit((homepage or "").strip())
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    host = parts.netloc.lower()
+    if host in GENERIC_SITE_HOSTS or host.endswith((".github.com", ".pypi.org")):
+        return None
+    page = fetch_text(homepage)
+    ranked: List[Tuple[int, str]] = []
+    for tag in LINK_TAG_RE.findall(page):
+        a = _attrs(tag, TAG_ATTR_RE)
+        rel = (a.get("rel") or "").lower().split()
+        if not a.get("href") or not any(r in ("icon", "apple-touch-icon", "apple-touch-icon-precomposed", "shortcut") for r in rel):
+            continue
+        size = 180 if "apple-touch-icon" in rel or "apple-touch-icon-precomposed" in rel else 0
+        m = re.match(r"(\d+)x(\d+)", (a.get("sizes") or "").lower())
+        if m:
+            size = max(size, int(m.group(1)))
+        href = a["href"].strip()
+        if href.lower().endswith(".svg"):
+            size = max(size, 512)
+        ranked.append((size, urljoin(homepage, href)))
+    for _, url in sorted(ranked, key=lambda r: -r[0]):
+        if probe(url):
+            return url
+    fallback = "%s://%s/favicon.ico" % (parts.scheme, parts.netloc)
+    return fallback if probe(fallback) else None
+
+
+def resolve_project_image(repo: dict, homepage: str, probe: Callable[[str], bool] = _url_is_image,
+                          fetch_text: Callable[[str], str] = _fetch_text) -> Tuple[Optional[str], Optional[str]]:
+    """(url, source) of the project's picture, or (None, None) when none is found."""
+    for url, source in image_candidates(repo):
+        if probe(url):
+            return url, source
+    icon = site_icon(homepage, fetch_text=fetch_text, probe=probe)
+    if icon:
+        return icon, "website"
+    return None, None
 
 
 def parse_dt(value: Optional[str]) -> Optional[datetime]:
@@ -601,7 +824,9 @@ def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] =
         contributors_total = ((repo.get("mentionableUsers") or {}).get("totalCount"))
     ci_rate = fetch_ci_stats(client, full_name, now)
 
-    return build_metrics(repo, commits, counts, contributors_total, ci_rate, now, prior_commits=prior_commits)
+    metrics = build_metrics(repo, commits, counts, contributors_total, ci_rate, now, prior_commits=prior_commits)
+    metrics["image"], metrics["image_source"] = resolve_project_image(repo, metrics["homepage"])
+    return metrics
 
 
 def build_metrics(repo: dict, commits: List[dict], counts: Dict[str, int],

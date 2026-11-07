@@ -247,6 +247,17 @@ Raise `MAX_FULL_COLLECT` only with a bigger budget (a GitHub App token), never
 by pooling several personal tokens, which GitHub's terms forbid. The fallback
 token is not pooling: a repository is read with one token per run.
 
+## Project pictures
+
+Each project on the leaderboard can show a picture, found by the collector in
+this order and recorded in the metrics cache: a logo in the repository (a
+`logo*`, `icon*` or `favicon*` image at the root, in `.github/` or `docs/`, or
+the README's logo image, badges excluded), the GitHub organisation's avatar
+(personal accounts are not used), then the website's icon (the largest
+`<link rel="icon">` it declares, else `/favicon.ico`; generic hosts such as
+GitHub, PyPI or Hugging Face never count). Every candidate is fetched once to
+confirm it is an image. A project with none shows no picture.
+
 ## Curating the board
 
 Three small files in the repository root adjust the automatic selection, and

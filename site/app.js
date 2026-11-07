@@ -85,6 +85,17 @@
 
   // ---------------------------------------------------------------- utils
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  // The project's picture, found by the collector in the repository, at its
+  // GitHub organisation or on its website; projects without one show nothing.
+  function logoImg(p, cls) {
+    if (!p.image || !/^https?:\/\//.test(p.image)) return "";
+    return '<img class="logo ' + cls + " src-" + esc(p.image_source || "repo") + '" src="' + esc(p.image) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
+  }
+  // a picture that fails to load disappears instead of leaving a broken-image box
+  document.addEventListener("error", function (e) {
+    var t = e.target;
+    if (t && t.tagName === "IMG" && t.classList.contains("logo")) t.remove();
+  }, true);
   function fmtInt(n) { if (n == null) return "—"; return Number(n).toLocaleString("en-US"); }
   function fmtCompact(n) {
     if (n == null) return "—";
@@ -193,8 +204,8 @@
       var chips = (p.topics || []).slice(0, 4).map(function (t) { return '<span class="chip">' + esc(t) + "</span>"; }).join("");
       return '<tr tabindex="0" data-id="' + esc(p.full_name) + '">' +
         '<td class="rank">' + p.rank + "</td>" +
-        '<td class="proj"><div class="name"><span class="owner">' + esc(p.owner) + " / </span>" + esc(p.name) + "</div>" +
-        '<div class="desc" title="' + esc(p.description) + '">' + esc(p.description) + "</div>" + chips + "</td>" +
+        '<td class="proj"><div class="proj-row">' + logoImg(p, "row-logo") + '<div class="proj-text"><div class="name"><span class="owner">' + esc(p.owner) + " / </span>" + esc(p.name) + "</div>" +
+        '<div class="desc" title="' + esc(p.description) + '">' + esc(p.description) + "</div>" + chips + "</div></div></td>" +
         '<td class="main">' + scoreCell(p, "overall") + "</td>" +
         '<td class="num">' + starsCell(p) + "</td>" +
         '<td class="cat cat-col">' + esc(p.category) + "</td>" +
@@ -274,7 +285,7 @@
       return "<tr><td>" + r[1] + "</td><td>" + fmtMetric(m[r[0]], r[2]) + note + "</td></tr>";
     }).join("");
     $("drawer").innerHTML =
-      '<div class="drawer-head"><div><h2>' + esc(p.name) + " <small>" + esc(p.owner) + "</small></h2>" +
+      '<div class="drawer-head">' + logoImg(p, "drawer-logo") + "<div><h2>" + esc(p.name) + " <small>" + esc(p.owner) + "</small></h2>" +
       '<div class="desc">' + esc(p.description || "") + "</div></div>" +
       '<button class="icon-btn" id="close" type="button" aria-label="Close">✕</button></div>' +
       '<div class="meta"><span>#' + p.rank + " overall</span><span>" + esc(p.category) + "</span>" +

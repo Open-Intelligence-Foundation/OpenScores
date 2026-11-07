@@ -126,6 +126,15 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: now
 /* the star delta sits under the count, like the overall score's delta, so the
    column never has to hold "152k ▲ 1.2k" on one line */
 td.num .delta { display: block; margin-left: 0; }
+/* the project's picture sits in a fixed column so names line up whether or
+   not a project has one; logos are letterboxed on a light tile, avatars fill it */
+.proj-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: center; min-width: 0; }
+.proj-text { min-width: 0; }
+.logo { display: block; width: 34px; height: 34px; border-radius: 8px; object-fit: contain; padding: 3px; box-sizing: border-box;
+        background: #fff; border: 1px solid var(--border); color: transparent; }
+.logo.src-org { object-fit: cover; padding: 0; }
+.drawer-logo { width: 56px; height: 56px; border-radius: 12px; padding: 5px; flex: 0 0 auto; }
+.drawer-head > div:not(.logo) { flex: 1 1 auto; min-width: 0; }
 .proj .name { font-weight: 600; }
 .proj .owner { color: var(--muted); font-weight: 400; }
 .proj .desc { color: var(--ink-2); font-size: 13px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
