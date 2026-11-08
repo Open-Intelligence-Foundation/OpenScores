@@ -834,6 +834,7 @@ def collect_repo(client: GitHubClient, full_name: str, now: Optional[datetime] =
 
     metrics = build_metrics(repo, commits, counts, contributors_total, ci_rate, now, prior_commits=prior_commits)
     metrics["image"], metrics["image_source"] = resolve_project_image(repo, metrics["homepage"])
+    metrics["image_rules"] = config.IMAGE_RULES_VERSION
     return metrics
 
 

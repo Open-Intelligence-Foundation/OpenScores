@@ -23,9 +23,11 @@ def metrics_for(name):
     owner, _, short = name.partition("/")
     repo.update({"nameWithOwner": name, "name": short, "url": "https://github.com/" + name})
     repo["owner"] = {"__typename": "Organization", "login": owner}
-    return collect.build_metrics(repo, [], {k: 1 for k in ("issuesOpened", "issuesClosed", "prsOpened", "prsMerged",
-                                                           "prsClosed", "staleIssues", "breaking")},
-                                 10, 0.9, datetime.now(timezone.utc))
+    m = collect.build_metrics(repo, [], {k: 1 for k in ("issuesOpened", "issuesClosed", "prsOpened", "prsMerged",
+                                                        "prsClosed", "staleIssues", "breaking")},
+                              10, 0.9, datetime.now(timezone.utc))
+    m["image"], m["image_source"], m["image_rules"] = None, None, config.IMAGE_RULES_VERSION   # as collect_repo adds
+    return m
 
 
 def test_two_runs_use_cache_and_light_refresh(tmp_path, monkeypatch):

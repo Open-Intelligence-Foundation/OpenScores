@@ -79,8 +79,10 @@ def plan_collection(targets: List[str], cache: Dict[str, dict], now: datetime,
     """Split targets into (full collections, cache reuse) for this run.
 
     Never-collected repositories go first, then the stalest cached ones, up to
-    ``max_full``.  Whatever does not fit is reused from cache this run and
-    picked up by the next.  Returns the two lists and counts for the log.
+    ``max_full``.  A cached repository without a picture whose picture was
+    resolved under older rules (config.IMAGE_RULES_VERSION) is also due.
+    Whatever does not fit is reused from cache this run and picked up by the
+    next.  Returns the two lists and counts for the log.
     """
     max_full = config.MAX_FULL_COLLECT if max_full is None else max_full
     refresh_days = config.FULL_REFRESH_DAYS if refresh_days is None else refresh_days
@@ -94,7 +96,9 @@ def plan_collection(targets: List[str], cache: Dict[str, dict], now: datetime,
             continue
         collected = parse_dt(entry.get("collected_at"))
         age = days_since(collected, now) if collected else None
-        if age is None or age >= refresh_days:
+        metrics = entry.get("metrics") or {}
+        retry_picture = metrics.get("image") is None and metrics.get("image_rules") != config.IMAGE_RULES_VERSION
+        if age is None or age >= refresh_days or retry_picture:
             stale.append((float("inf") if age is None else age, name))
         else:
             fresh.append(name)

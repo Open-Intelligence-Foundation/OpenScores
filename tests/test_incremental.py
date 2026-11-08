@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from whitescore import incremental
+from whitescore import config, incremental
 
 NOW = datetime(2026, 10, 30, 6, 0, 0, tzinfo=timezone.utc)
 
@@ -12,6 +12,7 @@ def iso(dt):
 def entry(days_ago, **metrics):
     base = {"full_name": "x/y", "stars": 100, "forks": 10, "watchers": 5, "open_issues": 3, "open_prs": 1,
             "days_since_commit": 2.0, "days_since_release": 20.0, "age_months": 24.0,
+            "image": None, "image_rules": config.IMAGE_RULES_VERSION,
             "collected_at": iso(NOW - timedelta(days=days_ago))}
     base.update(metrics)
     return {"collected_at": iso(NOW - timedelta(days=days_ago)), "metrics": base}
@@ -37,6 +38,18 @@ def test_plan_treats_unparseable_timestamp_as_stalest():
     cache = {"a/bad": {"collected_at": "garbage", "metrics": {"full_name": "a/bad"}}, "a/old": entry(10)}
     full, _, _ = incremental.plan_collection(["a/old", "a/bad"], cache, NOW, max_full=1, refresh_days=3)
     assert full == ["a/bad"]
+
+
+def test_plan_retries_pictureless_repos_collected_under_older_picture_rules():
+    cache = {"a/pictured": entry(0.5, image="https://example.org/logo.png", image_rules=1),   # has one: waits its turn
+             "a/old-rules": entry(0.5, image=None, image_rules=1),                            # none, old rules: due
+             "a/never": entry(0.5), "a/fresh": entry(0.5)}                                     # none, current rules: waits
+    del cache["a/never"]["metrics"]["image"]; del cache["a/never"]["metrics"]["image_rules"]   # before pictures existed
+    full, reuse, stats = incremental.plan_collection(["a/pictured", "a/old-rules", "a/never", "a/fresh"], cache, NOW,
+                                                     max_full=-1, refresh_days=3)
+    assert sorted(full) == ["a/never", "a/old-rules"]
+    assert sorted(reuse) == ["a/fresh", "a/pictured"]
+    assert stats["stale"] == 2 and stats["fresh"] == 2
 
 
 # --------------------------------------------------------------- light refresh
