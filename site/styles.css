@@ -133,7 +133,7 @@ td.num .delta { display: block; margin-left: 0; }
 .proj-text { grid-column: 2; min-width: 0; }   /* pinned: without a picture it must not fall into the picture column */
 .logo { display: block; width: 34px; height: 34px; border-radius: 8px; object-fit: contain; padding: 3px; box-sizing: border-box;
         background: #fff; border: 1px solid var(--border); color: transparent; }
-.logo.src-org { object-fit: cover; padding: 0; }
+.logo.src-org, .logo.src-user { object-fit: cover; padding: 0; }
 .drawer-logo { width: 56px; height: 56px; border-radius: 12px; padding: 5px; flex: 0 0 auto; }
 .drawer-head > div:not(.logo) { flex: 1 1 auto; min-width: 0; }
 .proj .name { font-weight: 600; }

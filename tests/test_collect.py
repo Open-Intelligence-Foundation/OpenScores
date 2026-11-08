@@ -596,13 +596,15 @@ def test_image_candidates_prefer_a_repo_logo_then_the_readme_logo_then_the_org_a
     ]
 
 
-def test_image_candidates_skip_badges_user_avatars_and_unsafe_paths():
+def test_image_candidates_skip_badges_and_unsafe_paths_and_use_a_personal_avatar_last():
     repo = fake_repo()
     repo["owner"] = {"__typename": "User", "login": "someone", "avatarUrl": "https://avatars.githubusercontent.com/u/2"}
     repo["readmeMd"] = {"text": "![logo badge](https://img.shields.io/badge/logo-x-blue)\n"
                                 "<img alt=\"logo\" src=\"../../etc/logo.png\">\n"
                                 "<img alt=\"logo\" src=\"data:image/png;base64,AAAA\">\n"
                                 "<img alt=\"logo\" src=\"ftp://example.org/logo.png\">\n"}
+    assert collect.image_candidates(repo) == [("https://avatars.githubusercontent.com/u/2", "user")]
+    repo["owner"] = {"__typename": "User", "login": "someone"}
     assert collect.image_candidates(repo) == []
 
 
@@ -616,6 +618,17 @@ def test_resolve_project_image_takes_the_first_candidate_that_is_really_an_image
     assert collect.resolve_project_image(repo, "https://ai-tool.dev", probe=probe, fetch_text=lambda u: "") == \
         ("https://avatars.githubusercontent.com/u/1?v=4", "org")
     assert probed[0] == "https://raw.githubusercontent.com/acme/ai-tool/HEAD/logo.png"
+
+
+def test_site_icon_keeps_a_small_inline_data_uri_icon():
+    inline = "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E"
+    page = '<link rel="icon" href="%s"><link rel="icon" href="/favicon-16.png" sizes="16x16">' % inline
+    assert collect.site_icon("https://pyod.dev/", fetch_text=lambda u: page, probe=lambda u: True) == inline
+    # too large, or not an image, and it is ignored
+    huge = '<link rel="icon" href="data:image/svg+xml,%s">' % ("x" * 9000)
+    assert collect.site_icon("https://pyod.dev/", fetch_text=lambda u: huge, probe=lambda u: False) is None
+    assert collect.site_icon("https://pyod.dev/", fetch_text=lambda u: '<link rel="icon" href="data:text/plain,hi">',
+                             probe=lambda u: False) is None
 
 
 def test_resolve_project_image_falls_back_to_the_website_icon_then_to_nothing():

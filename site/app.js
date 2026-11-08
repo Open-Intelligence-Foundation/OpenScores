@@ -88,7 +88,7 @@
   // The project's picture, found by the collector in the repository, at its
   // GitHub organisation or on its website; projects without one show nothing.
   function logoImg(p, cls) {
-    if (!p.image || !/^https?:\/\//.test(p.image)) return "";
+    if (!p.image || !/^(https?:\/\/|data:image\/)/i.test(p.image)) return "";
     return '<img class="logo ' + cls + " src-" + esc(p.image_source || "repo") + '" src="' + esc(p.image) + '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">';
   }
   // a picture that fails to load disappears instead of leaving a broken-image box

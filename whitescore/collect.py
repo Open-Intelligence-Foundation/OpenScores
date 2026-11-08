@@ -66,6 +66,7 @@ GENERIC_SITE_HOSTS = ("github.com", "www.github.com", "pypi.org", "huggingface.c
                       "colab.research.google.com", "npmjs.com", "www.npmjs.com", "crates.io", "t.me", "linkedin.com")
 IMAGE_HEADERS = {"User-Agent": "OpenScores collector (+https://openscores.io)", "Accept": "image/*,text/html;q=0.9,*/*;q=0.5"}
 IMAGE_TIMEOUT = 8
+INLINE_ICON_MAX = 8_192      # an icon declared as a data: URI is kept as is, up to this many characters
 _image_session = requests.Session()
 
 
@@ -167,8 +168,9 @@ def readme_images(text: str) -> List[Tuple[str, str]]:
 
 def image_candidates(repo: dict) -> List[Tuple[str, str]]:
     """Possible pictures for a repository, best first, as (url, source).
-    Sources are "repo" (a logo in the repository) and "org" (the GitHub
-    organisation's avatar); the website is tried separately, last."""
+    Sources are "repo" (a logo in the repository), "org" (the GitHub
+    organisation's avatar) and "user" (a personal account's avatar); the
+    website is tried separately, last."""
     full_name = repo.get("nameWithOwner") or ""
     found: List[Tuple[str, str]] = []
     seen = set()
@@ -211,8 +213,8 @@ def image_candidates(repo: dict) -> List[Tuple[str, str]]:
     for url in plain:
         add(url, "repo")
     owner = repo.get("owner") or {}
-    if owner.get("__typename") == "Organization" and owner.get("avatarUrl"):
-        add(owner["avatarUrl"], "org")
+    if owner.get("avatarUrl") and owner.get("__typename") in ("Organization", "User"):
+        add(owner["avatarUrl"], "org" if owner["__typename"] == "Organization" else "user")
     for url in dark:
         add(url, "repo")
     return found
@@ -220,7 +222,9 @@ def image_candidates(repo: dict) -> List[Tuple[str, str]]:
 
 def site_icon(homepage: str, fetch_text: Callable[[str], str] = _fetch_text,
               probe: Callable[[str], bool] = _url_is_image) -> Optional[str]:
-    """The website's icon: the largest <link rel=icon> it declares, else /favicon.ico."""
+    """The website's icon: the largest <link rel=icon> it declares, else
+    /favicon.ico.  An icon embedded in the page as a small data: URI is
+    returned as it is."""
     parts = urlsplit((homepage or "").strip())
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return None
@@ -239,11 +243,15 @@ def site_icon(homepage: str, fetch_text: Callable[[str], str] = _fetch_text,
         if m:
             size = max(size, int(m.group(1)))
         href = a["href"].strip()
+        if href.lower().startswith("data:"):
+            if href.lower().startswith("data:image/") and len(href) <= INLINE_ICON_MAX:
+                ranked.append((size or 256, href))
+            continue
         if href.lower().endswith(".svg"):
             size = max(size, 512)
         ranked.append((size, urljoin(homepage, href)))
     for _, url in sorted(ranked, key=lambda r: -r[0]):
-        if probe(url):
+        if url.startswith("data:") or probe(url):
             return url
     fallback = "%s://%s/favicon.ico" % (parts.scheme, parts.netloc)
     return fallback if probe(fallback) else None
