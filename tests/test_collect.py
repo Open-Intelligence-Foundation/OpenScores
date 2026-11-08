@@ -570,7 +570,7 @@ def test_collect_repo_falls_back_when_the_history_endpoint_is_missing():
 
 
 # ---------------------------------------------------------------- project image
-def test_image_candidates_prefer_a_repo_logo_then_the_readme_logo_then_the_org_avatar():
+def test_image_candidates_prefer_the_owner_avatar_then_repo_logos_then_readme_logos():
     repo = fake_repo()
     repo["root"]["entries"].append({"name": "Logo.svg", "type": "blob"})
     repo["docsDir"] = {"entries": [{"name": "icon-dark.png", "type": "blob"}, {"name": "logo", "type": "tree"}]}
@@ -584,11 +584,11 @@ def test_image_candidates_prefer_a_repo_logo_then_the_readme_logo_then_the_org_a
         "## Providers\n\n![kimi](public/providers/kimi-logo.png) ![edge](https://cdn.example.org/browser-logos/edge_64x64.png)\n"
         "![named](art/ai-tool-logo-dark.png)\n")}
     assert collect.image_candidates(repo) == [
+        ("https://avatars.githubusercontent.com/u/1?v=4", "org"),
         ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/Logo.svg", "repo"),
         ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/assets/ai-tool-logo.png", "repo"),
         ("https://raw.githubusercontent.com/acme/ai-tool/main/art/logo-wide.png", "repo"),
-        ("https://avatars.githubusercontent.com/u/1?v=4", "org"),
-        # variants drawn for dark backgrounds rank below the avatar, spaces are encoded,
+        # variants drawn for dark backgrounds rank last, spaces are encoded,
         # and below the first heading only a logo named after the project counts
         ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/docs/icon-dark.png", "repo"),
         ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/assets/logo%20white.svg", "repo"),
@@ -596,7 +596,7 @@ def test_image_candidates_prefer_a_repo_logo_then_the_readme_logo_then_the_org_a
     ]
 
 
-def test_image_candidates_skip_badges_and_unsafe_paths_and_use_a_personal_avatar_last():
+def test_image_candidates_skip_badges_and_unsafe_paths_and_use_a_personal_avatar():
     repo = fake_repo()
     repo["owner"] = {"__typename": "User", "login": "someone", "avatarUrl": "https://avatars.githubusercontent.com/u/2"}
     repo["readmeMd"] = {"text": "![logo badge](https://img.shields.io/badge/logo-x-blue)\n"
@@ -614,10 +614,10 @@ def test_resolve_project_image_takes_the_first_candidate_that_is_really_an_image
     probed = []
     def probe(url):
         probed.append(url)
-        return url.endswith("?v=4")                      # the logo file is gone; the avatar answers
+        return url.endswith("logo.png")                  # the avatar does not answer; the logo file does
     assert collect.resolve_project_image(repo, "https://ai-tool.dev", probe=probe, fetch_text=lambda u: "") == \
-        ("https://avatars.githubusercontent.com/u/1?v=4", "org")
-    assert probed[0] == "https://raw.githubusercontent.com/acme/ai-tool/HEAD/logo.png"
+        ("https://raw.githubusercontent.com/acme/ai-tool/HEAD/logo.png", "repo")
+    assert probed == ["https://avatars.githubusercontent.com/u/1?v=4", "https://raw.githubusercontent.com/acme/ai-tool/HEAD/logo.png"]
 
 
 def test_site_icon_keeps_a_small_inline_data_uri_icon():

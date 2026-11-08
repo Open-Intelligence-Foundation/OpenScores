@@ -43,10 +43,11 @@ def utcnow() -> datetime:
 
 
 # ------------------------------------------------------------------ project image
-# A project's picture on the board, found in this order: a logo file or the
-# README's logo in the repository, the GitHub organisation's avatar, the
-# website's icon.  Every candidate is fetched once to make sure it is really an
-# image; a project with none stays without a picture.
+# A project's picture on the board, found in this order: the owner's GitHub
+# avatar (the picture at the top of every repository page), a logo file or the
+# README's logo in the repository, the website's icon.  Every candidate is
+# fetched once to make sure it is really an image; a project with none stays
+# without a picture.
 
 IMAGE_EXTS = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".gif", ".ico")
 LOGO_FILE_RE = re.compile(r"^(logo|icon|favicon)[^/]*\.(png|svg|jpe?g|webp)$", re.I)
@@ -168,9 +169,9 @@ def readme_images(text: str) -> List[Tuple[str, str]]:
 
 def image_candidates(repo: dict) -> List[Tuple[str, str]]:
     """Possible pictures for a repository, best first, as (url, source).
-    Sources are "repo" (a logo in the repository), "org" (the GitHub
-    organisation's avatar) and "user" (a personal account's avatar); the
-    website is tried separately, last."""
+    Sources are "org" (the GitHub organisation's avatar), "user" (a personal
+    account's avatar) and "repo" (a logo in the repository); the website is
+    tried separately, last."""
     full_name = repo.get("nameWithOwner") or ""
     found: List[Tuple[str, str]] = []
     seen = set()
@@ -180,12 +181,18 @@ def image_candidates(repo: dict) -> List[Tuple[str, str]]:
             seen.add(url)
             found.append((url, source))
 
-    # A logo file in the repository, then the README's logo.  The project's own
-    # logo sits at the top of the README, before the first second-level
-    # heading; logos named after the project count anywhere.  Further down,
-    # "logo" images are usually other products' (providers, browsers,
-    # sponsors).  A variant drawn for dark backgrounds would vanish on the
-    # board's light tile, so it ranks below the organisation's avatar.
+    # The avatar shown at the top of the repository page on GitHub: the
+    # picture people associate with the project, and present for every owner.
+    owner = repo.get("owner") or {}
+    if owner.get("avatarUrl") and owner.get("__typename") in ("Organization", "User"):
+        add(owner["avatarUrl"], "org" if owner["__typename"] == "Organization" else "user")
+
+    # Then a logo file in the repository, then the README's logo.  The
+    # project's own logo sits at the top of the README, before the first
+    # second-level heading; logos named after the project count anywhere.
+    # Further down, "logo" images are usually other products' (providers,
+    # browsers, sponsors).  A variant drawn for dark backgrounds would vanish
+    # on the board's light tile, so it ranks last.
     plain, dark = [], []
     for key, prefix in (("root", ""), ("dotgithub", ".github/"), ("docsDir", "docs/")):
         for e in (repo.get(key) or {}).get("entries") or []:
@@ -210,12 +217,7 @@ def image_candidates(repo: dict) -> List[Tuple[str, str]]:
         if m.start() > head_len and not named:
             continue
         (dark if DARK_VARIANT_RE.search(filename) else plain).append(_raw_github_url(full_name, src))
-    for url in plain:
-        add(url, "repo")
-    owner = repo.get("owner") or {}
-    if owner.get("avatarUrl") and owner.get("__typename") in ("Organization", "User"):
-        add(owner["avatarUrl"], "org" if owner["__typename"] == "Organization" else "user")
-    for url in dark:
+    for url in plain + dark:
         add(url, "repo")
     return found
 

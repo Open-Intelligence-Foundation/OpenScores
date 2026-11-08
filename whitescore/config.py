@@ -146,7 +146,7 @@ FULL_REFRESH_DAYS = env_float("FULL_REFRESH_DAYS", 1)
 # Bump when the project-picture rules change: a cached project that has no
 # picture and was collected under older rules is recollected at the next run
 # instead of waiting for its regular refresh.
-IMAGE_RULES_VERSION = 2
+IMAGE_RULES_VERSION = 3
 MAX_FULL_COLLECT = env_int("MAX_FULL_COLLECT", 350)
 LIGHT_BATCH = env_int("LIGHT_BATCH", 50)         # repositories per light-refresh GraphQL request
 PAGES_PER_TOPIC = env_int("PAGES_PER_TOPIC", 2)  # 100 results per page

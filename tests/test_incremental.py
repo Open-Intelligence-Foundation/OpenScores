@@ -115,3 +115,13 @@ def test_load_cache_ignores_bad_or_foreign_files(tmp_path):
     path.write_text('{"version": 99, "entries": {"a/b": {}}}')
     assert incremental.load_cache(path) == {}
     assert incremental.load_cache(tmp_path / "missing.json") == {}
+
+
+def test_light_refresh_keeps_the_owner_avatar_as_the_picture():
+    assert "avatarUrl" in incremental.build_light_query(["acme/ai-tool"])
+    light = {"stargazerCount": 1, "forkCount": 1, "owner": {"__typename": "User", "avatarUrl": "https://avatars.githubusercontent.com/u/9"}}
+    m = incremental.apply_light(entry(2, image="https://example.org/old-logo.png", image_source="repo", image_rules=1)["metrics"], light, NOW)
+    assert (m["image"], m["image_source"], m["image_rules"]) == ("https://avatars.githubusercontent.com/u/9", "user", config.IMAGE_RULES_VERSION)
+    # no owner in the payload: the cached picture stays
+    m = incremental.apply_light(entry(2, image="https://example.org/logo.png", image_source="repo")["metrics"], {"stargazerCount": 1}, NOW)
+    assert m["image"] == "https://example.org/logo.png"

@@ -29,6 +29,7 @@ CACHE_VERSION = 1
 CACHE_KEEP_DAYS = 30  # entries for repositories that fell off the list expire after this
 
 LIGHT_FIELDS = """nameWithOwner stargazerCount forkCount pushedAt isArchived isDisabled
+      owner { __typename avatarUrl }
       watchers { totalCount }
       openIssues: issues(states: OPEN) { totalCount }
       openPRs: pullRequests(states: OPEN) { totalCount }
@@ -156,6 +157,12 @@ def apply_light(metrics: dict, light: Optional[dict], now: datetime) -> dict:
         m["open_issues"] = int((light.get("openIssues") or {}).get("totalCount") or 0)
         m["open_prs"] = int((light.get("openPRs") or {}).get("totalCount") or 0)
         m["is_archived"] = bool(light.get("isArchived"))
+        # the owner's avatar is the preferred picture and may change; keep it current
+        owner = light.get("owner") or {}
+        if owner.get("avatarUrl") and owner.get("__typename") in ("Organization", "User"):
+            m["image"] = owner["avatarUrl"]
+            m["image_source"] = "org" if owner["__typename"] == "Organization" else "user"
+            m["image_rules"] = config.IMAGE_RULES_VERSION
         committed = parse_dt((((light.get("defaultBranchRef") or {}).get("target") or {}).get("committedDate")))
     else:
         committed = None
